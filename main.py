@@ -1,0 +1,55 @@
+# define the main file for training the model in cnn.py from cifar10 dataset from datasets.py using pytorch_lightning
+import argparse
+
+from dataset import CIFAR10DataModule
+from models.betta import CIFAR10BettaModel
+from models.cnn import CIFAR10Model
+
+import pytorch_lightning as pl
+import torch
+
+from models.dir_beta import CIFAR10HyperModel
+from models.enn import CIFAR10EnnModel
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--num_workers', type=int, default=4)
+    parser.add_argument('--data_dir', type=str, default='../data')
+    parser.add_argument('--num_classes', type=int, default=10)
+    parser.add_argument('--learning_rate', type=float, default=1e-3)
+    parser.add_argument('--log_interval_steps', type=int, default=100)
+    parser.add_argument('--tensorboard_path', type=str, default='lightning_logs')
+    parser.add_argument('--epochs', type=int, default=20)
+    parser.add_argument('--model', type=str, default='cnn')
+    return parser.parse_args()
+
+def main():
+    args = parse_args()
+    data = CIFAR10DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
+    data.setup()
+    if args.model == 'cnn':
+        model = CIFAR10Model(num_classes=args.num_classes, learning_rate=args.learning_rate)
+    elif args.model == 'enn':
+        model = CIFAR10EnnModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
+    elif args.model == 'betta':
+        model = CIFAR10BettaModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
+    elif args.model == 'hyper':
+        model = CIFAR10HyperModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
+
+    trainer = pl.Trainer(
+        gpus=torch.cuda.device_count(),
+        log_every_n_steps=args.log_interval_steps,
+        logger=pl.loggers.TensorBoardLogger(args.tensorboard_path, "pipeline"),
+        max_epochs=args.epochs
+    )
+    train_dataloader = data.train_dataloader()
+    val_dataloader = data.val_dataloader()
+    print("\nStarting full training...\n")
+    trainer.fit(model, train_dataloader, val_dataloader)
+    results = trainer.test(model, val_dataloader)[0]
+    print(f'Test results: {results}')
+
+if __name__ == '__main__':
+    main()

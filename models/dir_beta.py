@@ -1,0 +1,105 @@
+import pytorch_lightning as pl
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torchvision.models as models
+from sympy.benchmarks.bench_meijerint import alpha
+from torch.optim import Adam
+from torcheval.metrics import MultilabelAccuracy
+
+from losses import ava_edl_criterion, get_evidential_hyperloss, get_evidential_loss
+from metrics import HyperAccuracy, HyperSetSize, PredictionSetSize
+
+
+class CIFAR10HyperModel(pl.LightningModule):
+    def __init__(self, num_classes=10, learning_rate=1e-3):
+        super(CIFAR10HyperModel, self).__init__()
+        self.save_hyperparameters()
+        self.model = models.resnet18(pretrained=False)
+        self.num_classes = num_classes
+        self.alpha = nn.Linear(self.model.fc.in_features, num_classes)
+        self.beta = nn.Linear(self.model.fc.in_features, num_classes)
+        self.multinomial_evidence_collector = nn.Linear(self.model.fc.in_features, num_classes)
+        self.hyper_evidence_collector = nn.Linear(num_classes * 2, num_classes + 1)
+        self.model.fc = nn.Identity()
+        self.set_metrics()
+
+    def forward(self, x):
+        logits = torch.relu(self.model(x))
+        alpha = self.alpha(logits)
+        beta = self.beta(logits)
+        multinomial_evidence = self.multinomial_evidence_collector(logits)
+
+        ev_diff = torch.relu(alpha - beta)
+        # logits_unfused = torch.relu(torch.cat([multinomial_evidence, ev_diff], dim=1))
+        logits_unfused = torch.cat([multinomial_evidence, ev_diff], dim=1)
+        hyper_evidence = self.hyper_evidence_collector(logits_unfused)
+        return alpha, beta, hyper_evidence, multinomial_evidence
+
+
+    def shared_step(self, batch, batch_idx):
+        x, y = batch
+        y = F.one_hot(y, self.num_classes)
+        logits_a, logits_b, logits, multinomial_logits = self(x)
+        evidence_a = F.elu(logits_a) + 2 # TODO - in the original implementation, they add 2, but it's not clear why, check this later
+        evidence_b = F.elu(logits_b) + 2
+        multinomial_evidence = F.elu(multinomial_logits) + 1
+        evidence_hyper = F.elu(logits) + 1
+        loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y)
+        multilabel_probs = evidence_a / (evidence_a + evidence_b)
+        hyperset = (evidence_a > evidence_b).int()
+
+        loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10, self.device, targets_one_hot=True)
+        hyper_loss_edl = get_evidential_hyperloss(evidence_hyper, multilabel_probs, y, self.current_epoch, self.num_classes, 10, self.device)
+        loss = hyper_loss_edl + loss_multilabel + loss_edl
+        return loss, evidence_hyper, evidence_a, evidence_b, y, hyperset
+
+    def training_step(self, batch, batch_idx):
+        loss, evidence_hyper, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
+        self.log('train_loss', loss)
+        y_hat = evidence_hyper.argmax(dim=1)
+        y_hat = F.one_hot(y_hat, self.num_classes + 1)
+        self.train_acc.update(y_hat, y, hyperset)
+        self.train_set_size.update(y_hat, hyperset)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss, evidence_hyper, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
+        self.log('val_loss', loss)
+        y_hat = evidence_hyper.argmax(dim=1)
+        y_hat = F.one_hot(y_hat, self.num_classes + 1)
+        self.val_acc.update(y_hat, y, hyperset)
+        self.val_set_size.update(y_hat, hyperset)
+
+    def test_step(self, batch, batch_idx):
+        loss, evidence_hyper, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
+        self.log('test_loss', loss)
+        y_hat = evidence_hyper.argmax(dim=1)
+        y_hat = F.one_hot(y_hat, self.num_classes + 1)
+        self.test_acc.update(y_hat, y, hyperset)
+        self.test_set_size.update(y_hat, hyperset)
+
+    def on_train_epoch_end(self) -> None:
+        self.log('train_acc', self.train_acc.compute())
+        self.log('train_set_size', self.train_set_size.compute())
+
+    def on_validation_epoch_end(self) -> None:
+        self.log('val_acc', self.val_acc.compute(), prog_bar=True)
+        self.log('val_set_size', self.val_set_size.compute(), prog_bar=True)
+
+    def on_test_epoch_end(self) -> None:
+        self.log('test_acc', self.test_acc.compute())
+        self.log('test_set_size', self.test_set_size.compute())
+        self.test_set_size.plot()
+
+    def configure_optimizers(self):
+        return Adam(self.parameters(), lr=self.hparams.learning_rate)
+
+    def set_metrics(self):
+        self.train_acc = HyperAccuracy()
+        self.val_acc = HyperAccuracy()
+        self.test_acc = HyperAccuracy()
+
+        self.train_set_size = HyperSetSize()
+        self.val_set_size = HyperSetSize()
+        self.test_set_size = HyperSetSize()
