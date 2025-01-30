@@ -1,3 +1,5 @@
+from math import gamma
+
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -7,7 +9,7 @@ from sympy.benchmarks.bench_meijerint import alpha
 from torch.optim import Adam
 from torcheval.metrics import MultilabelAccuracy
 
-from losses import ava_edl_criterion, get_evidential_hyperloss, get_evidential_loss
+from losses import ava_edl_criterion, get_equivalence_loss, get_evidential_hyperloss, get_evidential_loss
 from metrics import HyperAccuracy, HyperSetSize, PredictionSetSize
 
 
@@ -49,9 +51,15 @@ class CIFAR10HyperModel(pl.LightningModule):
         multilabel_probs = evidence_a / (evidence_a + evidence_b)
         hyperset = (evidence_a > evidence_b).int()
 
+        # gamma to be 0 before some epoch, then gradually go to 1 after some epoch
+        gamma = torch.min(
+            torch.tensor(1.0, dtype=torch.float32),
+            torch.tensor(self.current_epoch / 10, dtype=torch.float32),
+        )
         loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10, self.device, targets_one_hot=True)
         hyper_loss_edl = get_evidential_hyperloss(evidence_hyper, multilabel_probs, y, self.current_epoch, self.num_classes, 10, self.device)
-        loss = hyper_loss_edl + loss_multilabel + loss_edl
+        eqv_loss = get_equivalence_loss(multinomial_evidence, evidence_hyper)
+        loss = loss_multilabel + loss_edl + gamma * (hyper_loss_edl + eqv_loss)
         return loss, evidence_hyper, evidence_a, evidence_b, y, hyperset
 
     def training_step(self, batch, batch_idx):
@@ -60,7 +68,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
         self.train_acc.update(y_hat, y, hyperset)
-        self.train_set_size.update(y_hat, hyperset)
+        self.train_set_size.update(y_hat, hyperset, y)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -69,7 +77,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
         self.val_acc.update(y_hat, y, hyperset)
-        self.val_set_size.update(y_hat, hyperset)
+        self.val_set_size.update(y_hat, hyperset, y)
 
     def test_step(self, batch, batch_idx):
         loss, evidence_hyper, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
@@ -77,7 +85,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
         self.test_acc.update(y_hat, y, hyperset)
-        self.test_set_size.update(y_hat, hyperset)
+        self.test_set_size.update(y_hat, hyperset, y)
 
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute())

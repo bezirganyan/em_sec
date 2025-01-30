@@ -33,10 +33,12 @@ def main():
         model = CIFAR10Model(num_classes=args.num_classes, learning_rate=args.learning_rate)
     elif args.model == 'enn':
         model = CIFAR10EnnModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
-    elif args.model == 'betta':
+    elif args.model == 'beta':
         model = CIFAR10BettaModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
     elif args.model == 'hyper':
         model = CIFAR10HyperModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
+    else:
+        raise ValueError(f"Model {args.model} not supported")
 
     trainer = pl.Trainer(
         gpus=torch.cuda.device_count(),
