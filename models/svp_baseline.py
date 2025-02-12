@@ -26,7 +26,7 @@ class CIFAR10SVPModel(pl.LightningModule):
             "svptype": "fb",
             "beta": self.beta_param
         }
-        self.flat = SVPNet(phi=self.model, hidden_size=hs, classes=list(range(num_classes)), hierarchy="none", dropout=0.1)
+        self.flat = SVPNet(phi=self.model, hidden_size=hs, classes=list(range(num_classes)), hierarchy="none")
 
     def forward(self, x, y=None):
         return self.flat(x, y)
