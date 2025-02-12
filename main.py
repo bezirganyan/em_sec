@@ -36,7 +36,7 @@ def main():
 
     wandb_mode = 'disabled' if args.disable_wandb else 'online'
     wandb_name = f"{args.model}_cifar10_{args.beta}_beta_{args.epochs}_epochs_{args.learning_rate}_lr"
-    wandb.init(project='MMixer', name=wandb_name, config=vars(args), mode=wandb_mode)
+    wandb.init(project='VagueFusion', name=wandb_name, config=vars(args), mode=wandb_mode)
 
     data = CIFAR10DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
     data.setup()
