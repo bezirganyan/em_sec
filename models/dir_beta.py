@@ -14,9 +14,10 @@ from torcheval.metrics import MulticlassAccuracy
 
 
 class CIFAR10HyperModel(pl.LightningModule):
-    def __init__(self, num_classes=10, learning_rate=1e-3):
+    def __init__(self, num_classes=10, learning_rate=1e-3, beta=1):
         super(CIFAR10HyperModel, self).__init__()
         self.save_hyperparameters()
+        self.beta_param = beta
         self.model = models.resnet18(pretrained=False)
         self.num_classes = num_classes
         self.alpha = nn.Linear(self.model.fc.in_features, num_classes)
@@ -59,7 +60,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10, self.device, targets_one_hot=True)
         hyper_loss_edl = get_evidential_hyperloss(evidence_hyper, multilabel_probs, y, self.current_epoch, self.num_classes, 10, self.device)
         eqv_loss = get_equivalence_loss(multinomial_evidence, evidence_hyper)
-        utility = get_utility_loss(evidence_hyper, multilabel_probs, y, 1, self.device)
+        utility = get_utility_loss(evidence_hyper, multilabel_probs, y, self.beta_param, self.device)
 
         loss = loss_multilabel + loss_edl + gamma * (hyper_loss_edl + eqv_loss + utility)
         return loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, multilabel_probs
@@ -93,7 +94,10 @@ class CIFAR10HyperModel(pl.LightningModule):
                 # order the pred set by hyperset values in descending order
                 pred_set = sorted(pred_set, key=lambda x: hyperset[i][x], reverse=True)
             pred_sets.append(pred_set)
-        self.val_utility.update(pred_sets, y)
+        for utility in self.val_utility_dict.values():
+            if utility.device != self.device:
+                utility.to(self.device)
+            utility.update(pred_sets, y)
 
 
 
@@ -116,7 +120,10 @@ class CIFAR10HyperModel(pl.LightningModule):
                 # order the pred set by hyperset values in descending order
                 pred_set = sorted(pred_set, key=lambda x: hyperset[i][x], reverse=True)
             pred_sets.append(pred_set)
-        self.test_utility.update(pred_sets, y)
+        for utility in self.test_utility_dict.values():
+            if utility.device != self.device:
+                utility.to(self.device)
+            utility.update(pred_sets, y)
 
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute())
@@ -125,14 +132,15 @@ class CIFAR10HyperModel(pl.LightningModule):
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
         self.log('val_set_size', self.val_set_size.compute(), prog_bar=True)
-        self.log('val_utility', self.val_utility.compute(), prog_bar=True)
-        self.log('val_multiclass_acc', self.val_multiclass_acc.compute(), prog_bar=True)
+        for key, utility in self.val_utility_dict.items():
+            self.log(f'val_utility_{key}', utility.compute())
 
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
         self.log('test_set_size', self.test_set_size.compute())
-        self.log('test_utility', self.test_utility.compute())
         self.log('test_multiclass_acc', self.test_multiclass_acc.compute())
+        for key, utility in self.test_utility_dict.items():
+            self.log(f'test_utility_{key}', utility.compute())
         self.test_set_size.plot()
 
     def configure_optimizers(self):
@@ -143,12 +151,23 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.val_acc = HyperAccuracy()
         self.test_acc = HyperAccuracy()
 
-        self.train_utility = AverageUtility(self.num_classes, utility='fb', beta=1)
-        self.val_utility = AverageUtility(self.num_classes, utility='fb', beta=1)
-        self.test_utility = AverageUtility(self.num_classes, utility='fb', beta=1)
-        # self.train_utility = AverageUtility(self.num_classes, tolerance=0.7)
-        # self.val_utility = AverageUtility(self.num_classes, tolerance=0.7)
-        # self.test_utility = AverageUtility(self.num_classes, tolerance=0.7)
+        self.val_utility_dict = {
+            'fb': AverageUtility(self.num_classes, utility='fb', beta=self.beta_param),
+            'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
+            'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
+            'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
+            'owa_0.8': AverageUtility(self.num_classes, utility='owa', tolerance=0.8),
+            'owa_0.9': AverageUtility(self.num_classes, utility='owa', tolerance=0.9)
+        }
+
+        self.test_utility_dict = {
+            'fb': AverageUtility(self.num_classes, utility='fb', beta=self.beta_param),
+            'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
+            'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
+            'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
+            'owa_0.8': AverageUtility(self.num_classes, utility='owa', tolerance=0.8),
+            'owa_0.9': AverageUtility(self.num_classes, utility='owa', tolerance=0.9)
+        }
 
         self.train_set_size = HyperSetSize()
         self.val_set_size = HyperSetSize()

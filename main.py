@@ -25,6 +25,7 @@ def parse_args():
     parser.add_argument('--tensorboard_path', type=str, default='lightning_logs')
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--model', type=str, default='cnn')
+    parser.add_argument('--beta', type=float, default=1)
     return parser.parse_args()
 
 def main():
@@ -38,11 +39,11 @@ def main():
     elif args.model == 'beta':
         model = CIFAR10BettaModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
     elif args.model == 'hyper':
-        model = CIFAR10HyperModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
+        model = CIFAR10HyperModel(num_classes=args.num_classes, learning_rate=args.learning_rate, beta=args.beta)
     elif args.model == 'ds':
         model = CIFAR10DSModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
     elif args.model == 'svp':
-        model = CIFAR10SVPModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
+        model = CIFAR10SVPModel(num_classes=args.num_classes, learning_rate=args.learning_rate, beta=args.beta)
     else:
         raise ValueError(f"Model {args.model} not supported")
 
