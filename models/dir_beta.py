@@ -5,12 +5,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
-from sympy.benchmarks.bench_meijerint import alpha
 from torch.optim import Adam
-from torcheval.metrics import MultilabelAccuracy
 
-from losses import ava_edl_criterion, get_equivalence_loss, get_evidential_hyperloss, get_evidential_loss
-from metrics import HyperAccuracy, HyperSetSize, PredictionSetSize
+from losses import ava_edl_criterion, get_equivalence_loss, get_evidential_hyperloss, get_evidential_loss, \
+    get_utility_loss
+from metrics import AverageUtility, HyperAccuracy, HyperSetSize
+from torcheval.metrics import MulticlassAccuracy
 
 
 class CIFAR10HyperModel(pl.LightningModule):
@@ -59,33 +59,64 @@ class CIFAR10HyperModel(pl.LightningModule):
         loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10, self.device, targets_one_hot=True)
         hyper_loss_edl = get_evidential_hyperloss(evidence_hyper, multilabel_probs, y, self.current_epoch, self.num_classes, 10, self.device)
         eqv_loss = get_equivalence_loss(multinomial_evidence, evidence_hyper)
-        loss = loss_multilabel + loss_edl + gamma * (hyper_loss_edl + eqv_loss)
-        return loss, evidence_hyper, evidence_a, evidence_b, y, hyperset
+        utility = get_utility_loss(evidence_hyper, multilabel_probs, y, 1, self.device)
+
+        loss = loss_multilabel + loss_edl + gamma * (hyper_loss_edl + eqv_loss + utility)
+        return loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, multilabel_probs
 
     def training_step(self, batch, batch_idx):
-        loss, evidence_hyper, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
-        self.log('train_loss', loss)
+        loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
+        self.log('train_loss', loss, prog_bar=True)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
-        self.train_acc.update(y_hat, y, hyperset)
-        self.train_set_size.update(y_hat, hyperset, y)
+        self.train_acc.update(y_hat, y, hyperset > 0.5)
+        self.train_set_size.update(y_hat, hyperset > 0.5, y)
+
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, evidence_hyper, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
-        self.log('val_loss', loss)
+        loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
+        self.log('val_loss', loss, prog_bar=True)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
-        self.val_acc.update(y_hat, y, hyperset)
-        self.val_set_size.update(y_hat, hyperset, y)
+        self.val_acc.update(y_hat, y, hyperset > 0.5)
+        self.val_set_size.update(y_hat, hyperset > 0.5, y)
+        self.val_multiclass_acc.update(multinomial_evidence.argmax(dim=1), y.argmax(dim=1))
+        y_hat_idx_idx = evidence_hyper.argmax(dim=1)
+        pred_sets = []
+        for i in range(y_hat.shape[0]):
+            if y_hat_idx_idx[i] < self.num_classes:
+                pred_set = [y_hat_idx_idx[i].item()]
+            else:
+                # Assuming hyperset[i] is a tensor of shape (num_classes,) where positive values indicate membership.
+                pred_set = torch.nonzero(hyperset[i] > 0.5, as_tuple=False).squeeze(-1).tolist()
+                # order the pred set by hyperset values in descending order
+                pred_set = sorted(pred_set, key=lambda x: hyperset[i][x], reverse=True)
+            pred_sets.append(pred_set)
+        self.val_utility.update(pred_sets, y)
+
+
 
     def test_step(self, batch, batch_idx):
-        loss, evidence_hyper, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
+        loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
         self.log('test_loss', loss)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
-        self.test_acc.update(y_hat, y, hyperset)
-        self.test_set_size.update(y_hat, hyperset, y)
+        self.test_acc.update(y_hat, y, hyperset > 0.5)
+        self.test_set_size.update(y_hat, hyperset > 0.5, y)
+        self.test_multiclass_acc.update(multinomial_evidence.argmax(dim=1), y.argmax(dim=1))
+        y_hat_idx_idx = evidence_hyper.argmax(dim=1)
+        pred_sets = []
+        for i in range(y_hat.shape[0]):
+            if y_hat_idx_idx[i] < self.num_classes:
+                pred_set = [y_hat_idx_idx[i].item()]
+            else:
+                # Assuming hyperset[i] is a tensor of shape (num_classes,) where positive values indicate membership.
+                pred_set = torch.nonzero(hyperset[i] > 0.5, as_tuple=False).squeeze(-1).tolist()
+                # order the pred set by hyperset values in descending order
+                pred_set = sorted(pred_set, key=lambda x: hyperset[i][x], reverse=True)
+            pred_sets.append(pred_set)
+        self.test_utility.update(pred_sets, y)
 
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute())
@@ -94,10 +125,14 @@ class CIFAR10HyperModel(pl.LightningModule):
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
         self.log('val_set_size', self.val_set_size.compute(), prog_bar=True)
+        self.log('val_utility', self.val_utility.compute(), prog_bar=True)
+        self.log('val_multiclass_acc', self.val_multiclass_acc.compute(), prog_bar=True)
 
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
         self.log('test_set_size', self.test_set_size.compute())
+        self.log('test_utility', self.test_utility.compute())
+        self.log('test_multiclass_acc', self.test_multiclass_acc.compute())
         self.test_set_size.plot()
 
     def configure_optimizers(self):
@@ -108,6 +143,17 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.val_acc = HyperAccuracy()
         self.test_acc = HyperAccuracy()
 
+        self.train_utility = AverageUtility(self.num_classes, utility='fb', beta=1)
+        self.val_utility = AverageUtility(self.num_classes, utility='fb', beta=1)
+        self.test_utility = AverageUtility(self.num_classes, utility='fb', beta=1)
+        # self.train_utility = AverageUtility(self.num_classes, tolerance=0.7)
+        # self.val_utility = AverageUtility(self.num_classes, tolerance=0.7)
+        # self.test_utility = AverageUtility(self.num_classes, tolerance=0.7)
+
         self.train_set_size = HyperSetSize()
         self.val_set_size = HyperSetSize()
         self.test_set_size = HyperSetSize()
+
+        self.train_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
+        self.val_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
+        self.test_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)

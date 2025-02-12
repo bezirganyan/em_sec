@@ -205,12 +205,19 @@ def get_subjective_constraint(evidence, multilabel_probs):
 
 
 def get_evidential_hyperloss(evidence, multilabel_probs, target, epoch_num, num_classes, annealing_step, device):
-    pp = get_subjective_constraint(evidence, multilabel_probs)
+    # pp = get_subjective_constraint(evidence, multilabel_probs)
     hyperset = (multilabel_probs > 0.5).int()
     hyperset_corrects = ((hyperset & target.int()).sum(dim=1) > 0).unsqueeze(-1)
-    target = torch.cat((target, torch.ones(target.shape[0], 1).to(device) * hyperset_corrects), dim=1)
-    alpha_a = evidence + 1
+    # target = torch.cat((target, torch.ones(target.shape[0], 1).to(device) * hyperset_corrects), dim=1)
+    target = torch.cat((target, torch.ones(target.shape[0], 1).to(device)), dim=1)
     hyperset_soft_size = torch.sigmoid(1000 * (multilabel_probs - 0.5)).sum(dim=1)
+
+    beta = 1
+    gfb = (1+beta**2) / (hyperset_soft_size + beta**2)
+    discount = torch.ones(target.shape[0], target.shape[1] - 1).to(device)
+    discount = torch.cat((discount, gfb.unsqueeze(-1)), dim=1)
+    target = target * discount
+    alpha_a = evidence + 1
     loss_acc = edl_digamma_hyperloss(alpha_a, target, hyperset_soft_size, epoch_num, num_classes, annealing_step, device)
     return loss_acc
 
@@ -222,3 +229,16 @@ def get_equivalence_loss(multinomial_evidence, hyper_evidence):
     loss = torch.square(beliefs_m - beliefs_h).mean()
 
     return loss
+
+
+def get_utility_loss(evidence, multilabel_probs, target, beta, device):
+    set_utility = torch.ones(target.shape[0], 1).to(device)
+    hyperset_soft_size = torch.sigmoid(10000 * (multilabel_probs - 0.5)).sum(dim=1)
+    gfb = (1+beta**2) / (hyperset_soft_size + beta**2)
+    set_utility = set_utility * gfb.unsqueeze(-1)
+    target = torch.cat((target, set_utility), dim=1)
+    probs = (evidence + 1) / (evidence + 1).sum(dim=1, keepdim=True)
+    utility_abs = probs * target
+    utility_loss = torch.mean(utility_abs)
+    # return -utility_loss
+    return 0

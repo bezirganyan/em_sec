@@ -5,12 +5,15 @@ import torchvision.models as models
 from torch.optim import Adam
 from torchmetrics import Accuracy
 
+from models.fitnet import FitNet4
+
 
 class CIFAR10Model(pl.LightningModule):
     def __init__(self, num_classes=10, learning_rate=1e-3):
         super(CIFAR10Model, self).__init__()
         self.save_hyperparameters()
-        self.model = models.resnet18(pretrained=False)
+        # self.model = models.resnet18(pretrained=False)
+        self.model = FitNet4(output_dim=num_classes)
         self.num_classes = num_classes
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
         self.set_metrics()

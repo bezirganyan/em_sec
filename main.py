@@ -9,7 +9,9 @@ import pytorch_lightning as pl
 import torch
 
 from models.dir_beta import CIFAR10HyperModel
+from models.ds_baseline import CIFAR10DSModel
 from models.enn import CIFAR10EnnModel
+from models.svp_baseline import CIFAR10SVPModel
 
 
 def parse_args():
@@ -37,14 +39,19 @@ def main():
         model = CIFAR10BettaModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
     elif args.model == 'hyper':
         model = CIFAR10HyperModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
+    elif args.model == 'ds':
+        model = CIFAR10DSModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
+    elif args.model == 'svp':
+        model = CIFAR10SVPModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
     else:
         raise ValueError(f"Model {args.model} not supported")
 
     trainer = pl.Trainer(
-        gpus=torch.cuda.device_count(),
+        accelerator="auto",
         log_every_n_steps=args.log_interval_steps,
         logger=pl.loggers.TensorBoardLogger(args.tensorboard_path, "pipeline"),
-        max_epochs=args.epochs
+        max_epochs=args.epochs,
+        num_sanity_val_steps=0
     )
     train_dataloader = data.train_dataloader()
     val_dataloader = data.val_dataloader()
