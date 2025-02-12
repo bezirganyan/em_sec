@@ -297,3 +297,22 @@ class AverageUtility(Metric):
 
     def compute(self):
         return self.utility / self.total
+
+
+class SetSize(Metric):
+    def __init__(self, **kwargs):
+        super(SetSize, self).__init__(**kwargs)
+        self.add_state('set_sizes', default=torch.tensor([]), dist_reduce_fx='cat')
+
+    def update(self, inputs, labels):
+        set_sizes = torch.tensor([len(s) for s in inputs]).to(labels.device)
+        self.set_sizes = torch.cat((self.set_sizes, set_sizes))
+        return set_sizes.mean()
+
+    def merge_state(self, metrics):
+        for metric in metrics:
+            self.set_sizes = torch.cat((self.set_sizes, metric.set_sizes))
+        return self.set_sizes
+
+    def compute(self):
+        return self.set_sizes.mean()
