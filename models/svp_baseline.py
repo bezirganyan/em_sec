@@ -3,11 +3,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+import wandb
 from torch.optim import Adam
 from torchmetrics import Accuracy
 from svp.multiclass import SVPNet
 
-from metrics import AverageUtility
+from metrics import AverageUtility, SetSize
 
 
 class CIFAR10SVPModel(pl.LightningModule):
@@ -46,7 +47,9 @@ class CIFAR10SVPModel(pl.LightningModule):
         self.val_acc(y_hat, y)
         svp_preds_f = self.flat.predict_set(x, self.set_params)
         y_one_hot = F.one_hot(y, self.num_classes)
-        self.val_utility.update(svp_preds_f, y_one_hot)
+        self.val_set_size.update(svp_preds_f, y_one_hot)
+        for k, v in self.val_utility_dict.items():
+            v.update(svp_preds_f, y_one_hot)
 
 
     def test_step(self, batch, batch_idx):
@@ -57,18 +60,30 @@ class CIFAR10SVPModel(pl.LightningModule):
         self.test_acc(y_hat, y)
         svp_preds_f = self.flat.predict_set(x, self.set_params)
         y_one_hot = F.one_hot(y, self.num_classes)
-        self.test_utility.update(svp_preds_f, y_one_hot)
+        self.test_set_size.update(svp_preds_f, y_one_hot)
+        for k, v in self.test_utility_dict.items():
+            v.update(svp_preds_f, y_one_hot)
 
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute())
 
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
-        self.log('val_utility', self.val_utility.compute(), prog_bar=True)
+        self.log('val_set_size', self.val_set_size.compute(), prog_bar=True)
+        wandb.log({"val_set_size": self.val_set_size.compute()})
+        wandb.log({"val_acc": self.val_acc.compute()})
+        for k, v in self.val_utility_dict.items():
+            self.log(f'val_{k}', v.compute())
+            wandb.log({f'val_{k}': v.compute()})
 
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
-        self.log('test_utility', self.test_utility.compute())
+        self.log('test_set_size', self.test_set_size.compute())
+        wandb.log({"test_set_size": self.test_set_size.compute()})
+        wandb.log({"test_acc": self.test_acc.compute()})
+        for k, v in self.test_utility_dict.items():
+            self.log(f'test_{k}', v.compute())
+            wandb.log({f'test_{k}': v.compute()})
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=self.hparams.learning_rate)
@@ -78,6 +93,23 @@ class CIFAR10SVPModel(pl.LightningModule):
         self.val_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
         self.test_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
 
-        self.train_utility = AverageUtility(self.num_classes, tolerance=0.7)
-        self.val_utility = AverageUtility(self.num_classes, tolerance=0.7)
-        self.test_utility = AverageUtility(self.num_classes, tolerance=0.7)
+        self.val_utility_dict = {
+            'fb': AverageUtility(self.num_classes, utility='fb', beta=self.beta_param),
+            'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
+            'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
+            'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
+            'owa_0.8': AverageUtility(self.num_classes, utility='owa', tolerance=0.8),
+            'owa_0.9': AverageUtility(self.num_classes, utility='owa', tolerance=0.9)
+        }
+
+        self.test_utility_dict = {
+            'fb': AverageUtility(self.num_classes, utility='fb', beta=self.beta_param),
+            'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
+            'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
+            'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
+            'owa_0.8': AverageUtility(self.num_classes, utility='owa', tolerance=0.8),
+            'owa_0.9': AverageUtility(self.num_classes, utility='owa', tolerance=0.9)
+        }
+
+        self.val_set_size = SetSize()
+        self.test_set_size = SetSize()
