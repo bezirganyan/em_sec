@@ -307,7 +307,7 @@ class SetSize(Metric):
     def update(self, inputs, labels):
         set_sizes = torch.tensor([len(s) for s in inputs]).to(labels.device)
         self.set_sizes = torch.cat((self.set_sizes, set_sizes))
-        return set_sizes.mean()
+        return set_sizes.float().mean()
 
     def merge_state(self, metrics):
         for metric in metrics:
@@ -315,4 +315,4 @@ class SetSize(Metric):
         return self.set_sizes
 
     def compute(self):
-        return self.set_sizes.mean()
+        return self.set_sizes.float().mean()

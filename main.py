@@ -27,14 +27,14 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--model', type=str, default='cnn')
     parser.add_argument('--beta', type=float, default=1)
-    parser.add_argument('--enable-wandb', action='store_false', default=True)
+    parser.add_argument('--enable-wandb', action='store_true', default=False)
 
     return parser.parse_args()
 
 def main():
     args = parse_args()
 
-    wandb_mode = 'enabled' if args.enable_wandb else 'disabled'
+    wandb_mode = 'online' if args.enable_wandb else 'disabled'
     wandb_name = f"{args.model}_cifar10_{args.beta}_beta_{args.epochs}_epochs_{args.learning_rate}_lr"
     wandb.init(project='VagueFusion', name=wandb_name, config=vars(args), mode=wandb_mode)
 

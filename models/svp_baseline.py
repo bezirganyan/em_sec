@@ -26,7 +26,7 @@ class CIFAR10SVPModel(pl.LightningModule):
             "svptype": "fb",
             "beta": self.beta_param
         }
-        self.flat = SVPNet(phi=self.model, hidden_size=hs, classes=list(range(num_classes)), hierarchy="none")
+        self.flat = SVPNet(phi=self.model, hidden_size=hs, classes=list(range(num_classes)), hierarchy="none", dropout=0.1)
 
     def forward(self, x, y=None):
         return self.flat(x, y)
@@ -47,9 +47,12 @@ class CIFAR10SVPModel(pl.LightningModule):
         y_hat = torch.tensor(self.flat.predict(x)).to(y.device)
         self.val_acc(y_hat, y)
         svp_preds_f = self.flat.predict_set(x, self.set_params)
+        svp_preds_f = [torch.tensor(p).to(y.device) for p in svp_preds_f]
         y_one_hot = F.one_hot(y, self.num_classes)
         self.val_set_size.update(svp_preds_f, y_one_hot)
         for k, v in self.val_utility_dict.items():
+            if v.device != y_one_hot.device:
+                v.to(y_one_hot.device)
             v.update(svp_preds_f, y_one_hot)
 
 
@@ -60,9 +63,12 @@ class CIFAR10SVPModel(pl.LightningModule):
         y_hat = torch.tensor(self.flat.predict(x)).to(y.device)
         self.test_acc(y_hat, y)
         svp_preds_f = self.flat.predict_set(x, self.set_params)
+        svp_preds_f = [torch.tensor(p).to(y.device) for p in svp_preds_f]
         y_one_hot = F.one_hot(y, self.num_classes)
         self.test_set_size.update(svp_preds_f, y_one_hot)
         for k, v in self.test_utility_dict.items():
+            if v.device != y_one_hot.device:
+                v.to(y_one_hot.device)
             v.update(svp_preds_f, y_one_hot)
 
     def on_train_epoch_end(self) -> None:
