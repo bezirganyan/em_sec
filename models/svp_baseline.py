@@ -12,18 +12,19 @@ from metrics import AverageUtility, SetSize
 
 
 class CIFAR10SVPModel(pl.LightningModule):
-    def __init__(self, num_classes=10, learning_rate=1e-3):
+    def __init__(self, num_classes=10, learning_rate=1e-3, beta=1):
         super(CIFAR10SVPModel, self).__init__()
         self.save_hyperparameters()
         self.model = models.resnet18(pretrained=False)
         self.num_classes = num_classes
+        self.beta_param = beta
         hs = self.model.fc.in_features
         self.model.fc = nn.Identity()
         self.set_metrics()
         self.set_params = {
             "c": 10,
             "svptype": "fb",
-            "beta": 2
+            "beta": self.beta_param
         }
         self.flat = SVPNet(phi=self.model, hidden_size=hs, classes=list(range(num_classes)), hierarchy="none")
 
