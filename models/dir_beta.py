@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+import wandb
 from torch.optim import Adam
 
 from losses import ava_edl_criterion, get_equivalence_loss, get_evidential_hyperloss, get_evidential_loss, \
@@ -132,15 +133,23 @@ class CIFAR10HyperModel(pl.LightningModule):
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
         self.log('val_set_size', self.val_set_size.compute(), prog_bar=True)
+        self.log('val_multiclass_acc', self.val_multiclass_acc.compute())
+        wandb.log({'val_set_size': self.val_set_size.compute()})
+        wandb.log({'val_acc': self.val_acc.compute()})
+        wandb.log({'val_multiclass_acc': self.val_multiclass_acc.compute()})
         for key, utility in self.val_utility_dict.items():
             self.log(f'val_utility_{key}', utility.compute())
+            wandb.log({f'val_utility_{key}': utility.compute()})
 
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
         self.log('test_set_size', self.test_set_size.compute())
         self.log('test_multiclass_acc', self.test_multiclass_acc.compute())
+        wandb.log({'test_set_size': self.test_set_size.compute()})
+        wandb.log({'test_acc': self.test_acc.compute()})
         for key, utility in self.test_utility_dict.items():
             self.log(f'test_utility_{key}', utility.compute())
+            wandb.log({f'test_utility_{key}': utility.compute()})
         self.test_set_size.plot()
 
     def configure_optimizers(self):

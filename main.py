@@ -1,5 +1,6 @@
 # define the main file for training the model in cnn.py from cifar10 dataset from datasets.py using pytorch_lightning
 import argparse
+import wandb
 
 from dataset import CIFAR10DataModule
 from models.betta import CIFAR10BettaModel
@@ -26,10 +27,17 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--model', type=str, default='cnn')
     parser.add_argument('--beta', type=float, default=1)
+    parser.add_argument('--enable-wandb', action='store_false', default=True)
+
     return parser.parse_args()
 
 def main():
     args = parse_args()
+
+    wandb_mode = 'disabled' if args.disable_wandb else 'online'
+    wandb_name = f"{args.model}_cifar10_{args.beta}_beta_{args.epochs}_epochs_{args.learning_rate}_lr"
+    wandb.init(project='MMixer', name=wandb_name, config=vars(args), mode=wandb_mode)
+
     data = CIFAR10DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
     data.setup()
     if args.model == 'cnn':
