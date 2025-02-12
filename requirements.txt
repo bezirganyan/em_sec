@@ -1,0 +1,10 @@
+matplotlib==3.10.0
+numpy==2.2.2
+pytorch_lightning==2.5.0.post0
+scipy==1.15.1
+seaborn==0.13.2
+setvaluedprediction==0.0.6
+torch==2.6.0
+torcheval==0.0.7
+torchmetrics==1.6.1
+torchvision==0.21.0
