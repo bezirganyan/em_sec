@@ -138,8 +138,8 @@ class CIFAR10HyperModel(pl.LightningModule):
         wandb.log({'val_acc': self.val_acc.compute()})
         wandb.log({'val_multiclass_acc': self.val_multiclass_acc.compute()})
         for key, utility in self.val_utility_dict.items():
-            self.log(f'val_utility_{key}', utility.compute())
-            wandb.log({f'val_utility_{key}': utility.compute()})
+            self.log(f'val_{key}', utility.compute())
+            wandb.log({f'val_{key}': utility.compute()})
 
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
@@ -149,7 +149,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         wandb.log({'test_acc': self.test_acc.compute()})
         for key, utility in self.test_utility_dict.items():
             self.log(f'test_utility_{key}', utility.compute())
-            wandb.log({f'test_utility_{key}': utility.compute()})
+            wandb.log({f'test_{key}': utility.compute()})
         self.test_set_size.plot()
 
     def configure_optimizers(self):
