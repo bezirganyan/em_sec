@@ -204,7 +204,7 @@ def get_subjective_constraint(evidence, multilabel_probs):
 
 
 
-def get_evidential_hyperloss(evidence, multilabel_probs, target, epoch_num, num_classes, annealing_step, device):
+def get_evidential_hyperloss(evidence, multilabel_probs, target, epoch_num, num_classes, annealing_step, device, beta=1):
     # pp = get_subjective_constraint(evidence, multilabel_probs)
     hyperset = (multilabel_probs > 0.5).int()
     hyperset_corrects = ((hyperset & target.int()).sum(dim=1) > 0).unsqueeze(-1)
@@ -212,7 +212,6 @@ def get_evidential_hyperloss(evidence, multilabel_probs, target, epoch_num, num_
     target = torch.cat((target, torch.ones(target.shape[0], 1).to(device)), dim=1)
     hyperset_soft_size = torch.sigmoid(1000 * (multilabel_probs - 0.5)).sum(dim=1)
 
-    beta = 1
     gfb = (1+beta**2) / (hyperset_soft_size + beta**2)
     discount = torch.ones(target.shape[0], target.shape[1] - 1).to(device)
     discount = torch.cat((discount, gfb.unsqueeze(-1)), dim=1)

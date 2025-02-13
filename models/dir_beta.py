@@ -59,7 +59,7 @@ class CIFAR10HyperModel(pl.LightningModule):
             torch.tensor(self.current_epoch / 10, dtype=torch.float32),
         )
         loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10, self.device, targets_one_hot=True)
-        hyper_loss_edl = get_evidential_hyperloss(evidence_hyper, multilabel_probs, y, self.current_epoch, self.num_classes, 10, self.device)
+        hyper_loss_edl = get_evidential_hyperloss(evidence_hyper, multilabel_probs, y, self.current_epoch, self.num_classes, 10, self.device, beta=self.beta_param)
         eqv_loss = get_equivalence_loss(multinomial_evidence, evidence_hyper)
         utility = get_utility_loss(evidence_hyper, multilabel_probs, y, self.beta_param, self.device)
 
