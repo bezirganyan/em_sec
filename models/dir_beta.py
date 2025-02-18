@@ -1,5 +1,6 @@
 from math import gamma
 
+import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -10,9 +11,10 @@ from torch.optim import Adam
 
 from losses import ava_edl_criterion, get_equivalence_loss, get_evidential_hyperloss, get_evidential_loss, \
     get_utility_loss
-from metrics import AverageUtility, HyperAccuracy, HyperSetSize
+from metrics import AverageUtility, CorrectIncorrectUncertaintyPlotter, HyperAccuracy, HyperSetSize, \
+    HyperUncertaintyPlotter
 from torcheval.metrics import MulticlassAccuracy
-
+import seaborn as sns
 
 class CIFAR10HyperModel(pl.LightningModule):
     def __init__(self, num_classes=10, learning_rate=1e-3, beta=1):
@@ -47,8 +49,8 @@ class CIFAR10HyperModel(pl.LightningModule):
         logits_a, logits_b, logits, multinomial_logits = self(x)
         evidence_a = F.elu(logits_a) + 2 # TODO - in the original implementation, they add 2, but it's not clear why, check this later
         evidence_b = F.elu(logits_b) + 2
-        multinomial_evidence = F.elu(multinomial_logits) + 1
-        evidence_hyper = F.elu(logits) + 1
+        multinomial_evidence = torch.exp(multinomial_logits)
+        evidence_hyper = torch.exp(logits)
         loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y)
         multilabel_probs = evidence_a / (evidence_a + evidence_b)
         hyperset = (evidence_a > evidence_b).int()
@@ -121,10 +123,15 @@ class CIFAR10HyperModel(pl.LightningModule):
                 # order the pred set by hyperset values in descending order
                 pred_set = sorted(pred_set, key=lambda x: hyperset[i][x], reverse=True)
             pred_sets.append(pred_set)
+
+        self.cor_unc_plot.update(multinomial_evidence, y.argmax(dim=1))
+        self.hyper_uncertainty_plot.update(pred_sets, evidence_hyper, y)
         for utility in self.test_utility_dict.values():
             if utility.device != self.device:
                 utility.to(self.device)
             utility.update(pred_sets, y)
+
+
 
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute())
@@ -133,12 +140,13 @@ class CIFAR10HyperModel(pl.LightningModule):
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
         self.log('val_set_size', self.val_set_size.compute(), prog_bar=True)
-        self.log('val_multiclass_acc', self.val_multiclass_acc.compute())
+        self.log('val_multiclass_acc', self.val_multiclass_acc.compute(), prog_bar=True)
         wandb.log({'val_set_size': self.val_set_size.compute()})
         wandb.log({'val_acc': self.val_acc.compute()})
         wandb.log({'val_multiclass_acc': self.val_multiclass_acc.compute()})
         for key, utility in self.val_utility_dict.items():
-            self.log(f'val_{key}', utility.compute())
+            progress_bar = True if 'fb' in key else False
+            self.log(f'val_{key}', utility.compute(), prog_bar=progress_bar)
             wandb.log({f'val_{key}': utility.compute()})
 
     def on_test_epoch_end(self) -> None:
@@ -150,6 +158,8 @@ class CIFAR10HyperModel(pl.LightningModule):
         for key, utility in self.test_utility_dict.items():
             self.log(f'test_utility_{key}', utility.compute())
             wandb.log({f'test_{key}': utility.compute()})
+        self.cor_unc_plot.plot()
+        self.hyper_uncertainty_plot.plot()
         self.test_set_size.plot()
 
     def configure_optimizers(self):
@@ -185,3 +195,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.train_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
         self.val_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
         self.test_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
+
+
+        self.cor_unc_plot = CorrectIncorrectUncertaintyPlotter()
+        self.hyper_uncertainty_plot = HyperUncertaintyPlotter()

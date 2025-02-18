@@ -316,3 +316,74 @@ class SetSize(Metric):
 
     def compute(self):
         return self.set_sizes.float().mean()
+
+
+class CorrectIncorrectUncertaintyPlotter(Metric):
+    def __init__(self, **kwargs):
+        super(CorrectIncorrectUncertaintyPlotter, self).__init__(**kwargs)
+        self.add_state('corrects', default=torch.tensor([]), dist_reduce_fx='cat')
+        self.add_state('uncertainties', default=torch.tensor([]), dist_reduce_fx='cat')
+
+    def update(self, inputs, labels):
+        corrects = (inputs.argmax(dim=1) == labels).float()
+        uncertainties = inputs.shape[1] / (inputs + 1).sum(dim=1)
+        self.corrects = torch.cat((self.corrects, corrects))
+        self.uncertainties = torch.cat((self.uncertainties, uncertainties))
+
+    def merge_state(self, metrics):
+        for metric in metrics:
+            self.corrects = torch.cat((self.corrects, metric.corrects))
+            self.uncertainties = torch.cat((self.uncertainties, metric.uncertainties))
+
+    def compute(self):
+        return self.corrects, self.uncertainties
+
+    def plot(self):
+        corrects = self.corrects.cpu().numpy()
+        incorrects = 1 - corrects
+
+        corrects_uncertainty = self.uncertainties[self.corrects > 0.5].cpu().numpy()
+        incorrects_uncertainty = self.uncertainties[self.corrects < 0.5].cpu().numpy()
+
+        sns.kdeplot(corrects_uncertainty, label='Correct', color='g')
+        sns.kdeplot(incorrects_uncertainty, label='Incorrect', color='r')
+        plt.xlabel('Uncertainty')
+        plt.ylabel('Density')
+        plt.title('Correct vs Incorrect Uncertainty')
+        plt.legend()
+        plt.show()
+
+
+class HyperUncertaintyPlotter(Metric):
+    def __init__(self, **kwargs):
+        super(HyperUncertaintyPlotter, self).__init__(**kwargs)
+        self.add_state('uncertainties', default=torch.tensor([]), dist_reduce_fx='cat')
+        self.add_state('corrects', default=torch.tensor([]), dist_reduce_fx='cat')
+
+    def update(self, inputs, evidences, labels):
+        corrects = torch.tensor([labels[i].argmax() in inputs[i] for i in range(len(inputs))]).to(labels.device)
+        uncertainties = evidences.shape[1] / (evidences + 1).sum(dim=1)
+        self.uncertainties = torch.cat((self.uncertainties, uncertainties))
+        self.corrects = torch.cat((self.corrects, corrects))
+
+    def merge_state(self, metrics):
+        for metric in metrics:
+            self.uncertainties = torch.cat((self.uncertainties, metric.uncertainties))
+
+    def compute(self):
+        return self.uncertainties
+
+    def plot(self):
+        uncertainties = self.uncertainties.cpu().numpy()
+        corrects = self.corrects.cpu().numpy()
+
+        corrects_uncertainty = uncertainties[corrects > 0.5]
+        incorrects_uncertainty = uncertainties[corrects < 0.5]
+
+        sns.kdeplot(corrects_uncertainty, label='Correct', color='g')
+        sns.kdeplot(incorrects_uncertainty, label='Incorrect', color='r')
+        plt.xlabel('Uncertainty')
+        plt.ylabel('Density')
+        plt.title('Hyper Uncertainty')
+        plt.legend()
+        plt.show()

@@ -7,6 +7,7 @@ from torch.optim import Adam
 from torchmetrics import Accuracy
 
 from losses import get_evidential_loss
+from metrics import CorrectIncorrectUncertaintyPlotter
 
 
 class CIFAR10EnnModel(pl.LightningModule):
@@ -47,6 +48,7 @@ class CIFAR10EnnModel(pl.LightningModule):
         self.log('test_loss', loss)
         y_hat = torch.argmax(logits, dim=1)
         self.test_acc(y_hat, y)
+        self.cor_unc_plot.update(torch.exp(logits), y)
 
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute())
@@ -56,6 +58,7 @@ class CIFAR10EnnModel(pl.LightningModule):
 
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
+        self.cor_unc_plot.plot()
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=self.hparams.learning_rate)
@@ -65,3 +68,4 @@ class CIFAR10EnnModel(pl.LightningModule):
         self.val_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
         self.test_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
 
+        self.cor_unc_plot = CorrectIncorrectUncertaintyPlotter()
