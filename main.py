@@ -13,6 +13,7 @@ from models.dir_beta import CIFAR10HyperModel
 from models.ds_baseline import CIFAR10DSModel
 from models.enn import CIFAR10EnnModel
 from models.svp_baseline import CIFAR10SVPModel
+from utils import OnKeyboardInterruptCallback
 
 
 def parse_args():
@@ -60,13 +61,18 @@ def main():
         log_every_n_steps=args.log_interval_steps,
         logger=pl.loggers.TensorBoardLogger(args.tensorboard_path, "pipeline"),
         max_epochs=args.epochs,
-        num_sanity_val_steps=0
+        num_sanity_val_steps=0,
+        callbacks=[OnKeyboardInterruptCallback()]
     )
     train_dataloader = data.train_dataloader()
     val_dataloader = data.val_dataloader()
+    test_dataloader = data.test_dataloader()
     print("\nStarting full training...\n")
-    trainer.fit(model, train_dataloader, val_dataloader)
-    results = trainer.test(model, val_dataloader)[0]
+    try:
+        trainer.fit(model, train_dataloader, val_dataloader)
+    except KeyboardInterrupt:
+        print("\nTraining interrupted. Testing the model")
+    results = trainer.test(model, test_dataloader)[0]
     print(f'Test results: {results}')
 
 if __name__ == '__main__':
