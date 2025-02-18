@@ -42,6 +42,66 @@ class CIFAR10HyperModel(pl.LightningModule):
         hyper_evidence = self.hyper_evidence_collector(logits_unfused)
         return alpha, beta, hyper_evidence, multinomial_evidence
 
+    @staticmethod
+    def make_binomial_opinion(evidence_a, evidence_b, base_rate=0.5):
+        """
+        Convert raw evidence (evidence_a, evidence_b) into
+        binomial opinions (b, d, u, a) for each entry.
+        Shapes of evidence_a, evidence_b: (batch_size, num_classes).
+        """
+        # We add 1 to the denominator to avoid division by zero
+        total = evidence_a + evidence_b + 1.0
+
+        b = evidence_a / total
+        d = evidence_b / total
+        u = 1.0 - b - d
+        a = torch.full_like(b, base_rate)  # broadcast base_rate across all entries
+
+        return b, d, u, a
+
+    @staticmethod
+    def binomial_disjunction(bx, dx, ux, ax, by, dy, uy, ay):
+        """
+        Perform binomial comultiplication (disjunction) on two binomial opinions:
+          ωx = (bx, dx, ux, ax)
+          ωy = (by, dy, uy, ay)
+        Returns: (b_xy, d_xy, u_xy, a_xy)
+        following the standard subjective logic disjunction formula.
+        """
+        a_xy = ax + ay - ax * ay
+        b_xy = bx + by - bx * by
+
+        eps = 1e-10
+        denom = a_xy + eps  # to avoid division-by-zero
+
+        # d_{x∨y}
+        # = d_x d_y + [ (1-ax)*ay*bx*d_y + (1-ay)*ax*d_x*by ] / (ax + ay - ax*ay)
+        part_num = (1 - ax) * ay * bx * dy + (1 - ay) * ax * dx * by
+        d_xy = dx * dy + part_num / denom
+
+        # u_{x∨y} = (d_x u_y + d_y u_x) / (ax + ay - ax*ay)
+        u_xy = (dx * uy + dy * ux) / denom
+
+        return b_xy, d_xy, u_xy, a_xy
+
+    def comultiply_all(self, b_list, d_list, u_list, a_list):
+        """
+        Reduce a list of binomial opinions [ (b1,d1,u1,a1), (b2,d2,u2,a2), ... ]
+        by iteratively applying binomial_disjunction.
+        """
+        # Start with the first opinion
+        b_acc = b_list[0]
+        d_acc = d_list[0]
+        u_acc = u_list[0]
+        a_acc = a_list[0]
+
+        # Iteratively combine
+        for i in range(1, len(b_list)):
+            b_acc, d_acc, u_acc, a_acc = self.binomial_disjunction(
+                b_acc, d_acc, u_acc, a_acc,
+                b_list[i], d_list[i], u_list[i], a_list[i]
+            )
+        return b_acc, d_acc, u_acc, a_acc
 
     def shared_step(self, batch, batch_idx):
         x, y = batch
@@ -50,22 +110,25 @@ class CIFAR10HyperModel(pl.LightningModule):
         evidence_a = F.elu(logits_a) + 2 # TODO - in the original implementation, they add 2, but it's not clear why, check this later
         evidence_b = F.elu(logits_b) + 2
         multinomial_evidence = torch.exp(multinomial_logits)
-        evidence_hyper = torch.exp(logits)
+        # evidence_hyper = torch.exp(logits)
         loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y)
         multilabel_probs = evidence_a / (evidence_a + evidence_b)
         hyperset = (evidence_a > evidence_b).int()
 
-        # gamma to be 0 before some epoch, then gradually go to 1 after some epoch
-        gamma = torch.min(
-            torch.tensor(1.0, dtype=torch.float32),
-            torch.tensor(self.current_epoch / 10, dtype=torch.float32),
-        )
-        loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10, self.device, targets_one_hot=True)
-        hyper_loss_edl = get_evidential_hyperloss(evidence_hyper, multilabel_probs, y, self.current_epoch, self.num_classes, 10, self.device, beta=self.beta_param)
-        eqv_loss = get_equivalence_loss(multinomial_evidence, evidence_hyper)
-        utility = get_utility_loss(evidence_hyper, multilabel_probs, y, self.beta_param, self.device)
+        b, d, u, a = self.make_binomial_opinion(evidence_a, evidence_b)
+        masked_factors = torch.where(hyperset > 0.5, 1 - b, torch.ones_like(b))
+        prod_selected = masked_factors.prod(dim=1)
+        final_b = 1 - prod_selected
 
-        loss = loss_multilabel + loss_edl + gamma * (hyper_loss_edl + eqv_loss + utility)
+        loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10, self.device, targets_one_hot=True)
+
+        multinomial_uncertainty = self.num_classes / (multinomial_evidence + 1).sum(dim=1, keepdim=True)
+        multiomial_beliefs = multinomial_evidence / (multinomial_evidence + 1).sum(dim=1, keepdim=True)
+        set_beliefs_scaled = multinomial_uncertainty * final_b.unsqueeze(-1)
+        remaining_unc = multinomial_uncertainty * (1 - final_b.unsqueeze(-1))
+        hypernomial_beleifs = torch.cat([multiomial_beliefs, set_beliefs_scaled], dim=1)
+        evidence_hyper = (self.num_classes + 1) * hypernomial_beleifs / (remaining_unc + 1e-6)
+        loss = loss_multilabel + loss_edl # + gamma * (hyper_loss_edl + eqv_loss + utility)
         return loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, multilabel_probs
 
     def training_step(self, batch, batch_idx):
