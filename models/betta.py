@@ -7,7 +7,7 @@ from torch.optim import Adam
 from torcheval.metrics import MultilabelAccuracy
 
 from losses import ava_edl_criterion, get_evidential_loss
-from metrics import PredictionSetSize
+from metrics import BetaEvidenceAccumulator, PredictionSetSize
 
 
 class CIFAR10BettaModel(pl.LightningModule):
@@ -61,10 +61,12 @@ class CIFAR10BettaModel(pl.LightningModule):
         y_hat = (probs > 0.5).int()
         self.test_acc.update(y_hat, y)
         self.test_set_size(y_hat)
+        self.evidence_accumulator.to(self.device)
+        self.evidence_accumulator.update(evidence_a, evidence_b, y)
 
     def on_train_epoch_end(self) -> None:
-        self.log('train_acc', self.train_acc.compute())
-        self.log('train_set_size', self.train_set_size.compute())
+        self.log('train_acc', self.train_acc.compute(), prog_bar=True)
+        self.log('train_set_size', self.train_set_size.compute(), prog_bar=True)
 
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
@@ -73,9 +75,10 @@ class CIFAR10BettaModel(pl.LightningModule):
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
         self.log('test_set_size', self.test_set_size.compute())
+        self.evidence_accumulator.save('evidence_accumulator.pth')
 
     def configure_optimizers(self):
-        return Adam(self.parameters(), lr=self.hparams.learning_rate)
+        return Adam(self.parameters(), lr=self.hparams.learning_rate, weight_decay=1e-4)
 
     def set_metrics(self):
         self.train_acc = MultilabelAccuracy(criteria='contain')
@@ -85,3 +88,5 @@ class CIFAR10BettaModel(pl.LightningModule):
         self.train_set_size = PredictionSetSize()
         self.val_set_size = PredictionSetSize()
         self.test_set_size = PredictionSetSize()
+
+        self.evidence_accumulator = BetaEvidenceAccumulator()

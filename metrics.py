@@ -387,3 +387,35 @@ class HyperUncertaintyPlotter(Metric):
         plt.title('Hyper Uncertainty')
         plt.legend()
         plt.show()
+
+
+
+class BetaEvidenceAccumulator(Metric):
+    def __init__(self, **kwargs):
+        super(BetaEvidenceAccumulator, self).__init__(**kwargs)
+        self.add_state('alpha', default=[], dist_reduce_fx='cat')
+        self.add_state('beta', default=[], dist_reduce_fx='cat')
+        self.add_state('labels', default=[], dist_reduce_fx='cat')
+
+    def update(self, alpha, beta, labels):
+        self.alpha.append(alpha)
+        self.beta.append(beta)
+        self.labels.append(labels)
+
+    def merge_state(self, metrics):
+        for metric in metrics:
+            self.alpha.extend(metric.alpha)
+            self.beta.extend(metric.beta)
+            self.labels.extend(metric.labels)
+
+    def compute(self):
+        alpha = torch.cat(self.alpha).to('cpu')
+        beta = torch.cat(self.beta).to('cpu')
+        labels = torch.cat(self.labels).to('cpu')
+        return alpha, beta, labels
+
+    def save(self, path):
+        alpha = torch.cat(self.alpha).to('cpu')
+        beta = torch.cat(self.beta).to('cpu')
+        labels = torch.cat(self.labels).to('cpu')
+        torch.save((alpha, beta, labels), path)
