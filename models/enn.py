@@ -3,30 +3,31 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+import wandb
 from torch.optim import Adam
 from torchmetrics import Accuracy
 
 from losses import get_evidential_loss
 from metrics import CorrectIncorrectUncertaintyPlotter
+from models.conv_models import BasicBlock, ResNet
 
 
 class CIFAR10EnnModel(pl.LightningModule):
     def __init__(self, num_classes=10, learning_rate=1e-3):
         super(CIFAR10EnnModel, self).__init__()
         self.save_hyperparameters()
-        self.model = models.resnet18(pretrained=False)
+        self.learning_rate = learning_rate
+        self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
         self.num_classes = num_classes
-        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
         self.set_metrics()
 
     def forward(self, x):
         return self.model(x)
 
-
     def shared_step(self, batch, batch_idx):
         x, y = batch
         logits = self(x)
-        evidence = torch.exp(logits)
+        evidence = torch.nn.functional.softplus(logits)
         loss = get_evidential_loss(evidence, y, self.current_epoch, self.num_classes, 10, self.device)
         return loss, logits, y
 
@@ -52,16 +53,20 @@ class CIFAR10EnnModel(pl.LightningModule):
 
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute())
+        wandb.log({'train_acc': self.train_acc.compute()})
 
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
+        wandb.log({'val_acc': self.val_acc.compute()})
 
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
         self.cor_unc_plot.plot()
+        wandb.log({'test_acc': self.test_acc.compute()})
 
     def configure_optimizers(self):
-        return Adam(self.parameters(), lr=self.hparams.learning_rate)
+        optimizer = Adam(self.parameters(), lr=self.learning_rate)
+        return optimizer
 
     def set_metrics(self):
         self.train_acc = Accuracy(task='multiclass', num_classes=self.num_classes)

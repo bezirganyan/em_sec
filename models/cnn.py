@@ -2,20 +2,25 @@ import pytorch_lightning as pl
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
-from torch.optim import Adam
+import wandb
+from torch.optim import Adam, SGD
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torchmetrics import Accuracy
 
-from models.fitnet import FitNet4
+from models.conv_models import BasicBlock, FitNet4, ResNet, ResNet18
+from utils import append_dropout
 
 
 class CIFAR10Model(pl.LightningModule):
     def __init__(self, num_classes=10, learning_rate=1e-3):
         super(CIFAR10Model, self).__init__()
+        self.learning_rate = learning_rate
         self.save_hyperparameters()
-        # self.model = models.resnet18(pretrained=False)
-        self.model = FitNet4(output_dim=num_classes)
+        self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
+        # append_dropout(self.model, 0.3)
+        # self.model = FitNet4(output_dim=num_classes)
         self.num_classes = num_classes
-        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+        # self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
         self.set_metrics()
 
     def forward(self, x):
@@ -26,7 +31,8 @@ class CIFAR10Model(pl.LightningModule):
         y_hat = self(x)
         loss = F.cross_entropy(y_hat, y)
         self.log('train_loss', loss)
-        self.train_acc(y_hat, y)
+        acc = self.train_acc(y_hat, y)
+        self.log('train_acc', acc, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -45,15 +51,22 @@ class CIFAR10Model(pl.LightningModule):
 
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute())
+        wandb.log({'train_acc': self.train_acc.compute()})
+
 
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
+        wandb.log({'val_acc': self.val_acc.compute()})
 
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
+        wandb.log({'test_acc': self.test_acc.compute()})
 
     def configure_optimizers(self):
-        return Adam(self.parameters(), lr=self.hparams.learning_rate)
+        return Adam(self.parameters(), lr=self.learning_rate, weight_decay=1e-6)
+        # optimizer = SGD(self.parameters(), lr=self.learning_rate, momentum=0.9, weight_decay=5e-4)
+        # scheduler = CosineAnnealingLR(optimizer, T_max=200)
+        # return [optimizer], [scheduler]
 
     def set_metrics(self):
         self.train_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
