@@ -3,22 +3,25 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+import wandb
 from torch.optim import Adam
 from torcheval.metrics import MultilabelAccuracy
 
 from losses import ava_edl_criterion, get_evidential_loss
 from metrics import BetaEvidenceAccumulator, PredictionSetSize
+from models.conv_models import BasicBlock, ResNet
 
 
 class CIFAR10BettaModel(pl.LightningModule):
     def __init__(self, num_classes=10, learning_rate=1e-3):
         super(CIFAR10BettaModel, self).__init__()
         self.save_hyperparameters()
-        self.model = models.resnet18(pretrained=False)
+        self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
+
         self.num_classes = num_classes
-        self.alpha = nn.Linear(self.model.fc.in_features, num_classes)
-        self.beta = nn.Linear(self.model.fc.in_features, num_classes)
-        self.model.fc = nn.Identity()
+        self.alpha = nn.Linear(self.model.linear.in_features, num_classes)
+        self.beta = nn.Linear(self.model.linear.in_features, num_classes)
+        self.model.linear = nn.Identity()
         self.set_metrics()
 
     def forward(self, x):
@@ -67,18 +70,24 @@ class CIFAR10BettaModel(pl.LightningModule):
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute(), prog_bar=True)
         self.log('train_set_size', self.train_set_size.compute(), prog_bar=True)
+        wandb.log({"train_set_size": self.train_set_size.compute()})
+        wandb.log({"train_acc": self.train_acc.compute()})
 
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
         self.log('val_set_size', self.val_set_size.compute(), prog_bar=True)
+        wandb.log({"val_set_size": self.val_set_size.compute()})
+        wandb.log({"val_acc": self.val_acc.compute()})
 
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
         self.log('test_set_size', self.test_set_size.compute())
+        wandb.log({"test_set_size": self.test_set_size.compute()})
+        wandb.log({"test_acc": self.test_acc.compute()})
         self.evidence_accumulator.save('evidence_accumulator.pth')
 
     def configure_optimizers(self):
-        return Adam(self.parameters(), lr=self.hparams.learning_rate, weight_decay=1e-4)
+        return Adam(self.parameters(), lr=self.hparams.learning_rate)
 
     def set_metrics(self):
         self.train_acc = MultilabelAccuracy(criteria='contain')

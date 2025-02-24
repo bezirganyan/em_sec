@@ -145,7 +145,22 @@ def get_bm_loss(alphas, alpha_a, target):
     return loss_acc
 
 
-def ava_edl_criterion(B_alpha, B_beta, targets):
+def ava_edl_criterion_new(B_alpha, B_beta, targets, fbeta=1):
+    # edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + (1 - targets) * (
+    #         torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta)))
+
+    probs = B_alpha / (B_alpha + B_beta)
+    size = torch.sigmoid(10 * (probs - 0.5)).sum(dim=1)
+    num_classes = B_alpha.shape[1]
+    edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + (1 / (num_classes - 1)) * (1 - targets) * (
+            torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))) + 20*torch.relu(1.5 - size).mean()
+
+    gfb = (2 + fbeta ** 2) / (size + fbeta ** 2)
+
+    # edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)))
+    return edl_loss + torch.relu(-torch.log(torch.mean(gfb)))
+
+def ava_edl_criterion(B_alpha, B_beta, targets, fbeta=1):
     # edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + (1 - targets) * (
     #         torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta)))
 
@@ -215,7 +230,7 @@ def get_evidential_hyperloss(evidence, multilabel_probs, target, epoch_num, num_
     gfb = (1+beta**2) / (hyperset_soft_size + beta**2)
     discount = torch.ones(target.shape[0], target.shape[1] - 1).to(device)
     discount = torch.cat((discount, gfb.unsqueeze(-1)), dim=1)
-    target = target * discount
+    # target = target * discount
     alpha_a = evidence + 1
     loss_acc = edl_digamma_hyperloss(alpha_a, target, hyperset_soft_size, epoch_num, num_classes, annealing_step, device)
     return loss_acc

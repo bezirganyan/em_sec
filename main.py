@@ -3,7 +3,7 @@ import argparse
 import wandb
 
 from dataset import CIFAR10DataModule
-from models.betta import CIFAR10BettaModel
+from models.beta import CIFAR10BettaModel
 from models.cnn import CIFAR10Model
 
 import pytorch_lightning as pl
@@ -18,7 +18,7 @@ from utils import OnKeyboardInterruptCallback
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--data_dir', type=str, default='../data')
     parser.add_argument('--num_classes', type=int, default=10)
