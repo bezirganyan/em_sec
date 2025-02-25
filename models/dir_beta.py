@@ -186,7 +186,11 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.test_acc = HyperAccuracy()
 
         self.val_utility_dict = {
-            'fb': AverageUtility(self.num_classes, utility='fb', beta=self.beta_param),
+            'fb_1': AverageUtility(self.num_classes, utility='fb', beta=1),
+            'fb_2': AverageUtility(self.num_classes, utility='fb', beta=2),
+            'fb_3': AverageUtility(self.num_classes, utility='fb', beta=3),
+            'fb_4': AverageUtility(self.num_classes, utility='fb', beta=4),
+            'fb_5': AverageUtility(self.num_classes, utility='fb', beta=5),
             'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
             'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
             'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
@@ -195,7 +199,11 @@ class CIFAR10HyperModel(pl.LightningModule):
         }
 
         self.test_utility_dict = {
-            'fb': AverageUtility(self.num_classes, utility='fb', beta=self.beta_param),
+            'fb_1': AverageUtility(self.num_classes, utility='fb', beta=1),
+            'fb_2': AverageUtility(self.num_classes, utility='fb', beta=2),
+            'fb_3': AverageUtility(self.num_classes, utility='fb', beta=3),
+            'fb_4': AverageUtility(self.num_classes, utility='fb', beta=4),
+            'fb_5': AverageUtility(self.num_classes, utility='fb', beta=5),
             'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
             'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
             'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
