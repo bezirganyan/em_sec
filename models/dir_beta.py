@@ -149,30 +149,30 @@ class CIFAR10HyperModel(pl.LightningModule):
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute(), prog_bar=True)
         self.log('train_set_size', self.train_set_size.compute())
-        wandb.log({'train_set_size': self.train_set_size.compute()})
-        wandb.log({'train_acc': self.train_acc.compute()})
+        wandb.log({'train_set_size': self.train_set_size.compute()}, step=self.current_epoch)
+        wandb.log({'train_acc': self.train_acc.compute()}, step=self.current_epoch)
 
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
         self.log('val_set_size', self.val_set_size.compute(), prog_bar=True)
         self.log('val_multiclass_acc', self.val_multiclass_acc.compute(), prog_bar=True)
-        wandb.log({'val_set_size': self.val_set_size.compute()})
-        wandb.log({'val_acc': self.val_acc.compute()})
-        wandb.log({'val_multiclass_acc': self.val_multiclass_acc.compute()})
+        wandb.log({'val_set_size': self.val_set_size.compute()}, step=self.current_epoch)
+        wandb.log({'val_acc': self.val_acc.compute()}, step=self.current_epoch)
+        wandb.log({'val_multiclass_acc': self.val_multiclass_acc.compute()}, step=self.current_epoch)
         for key, utility in self.val_utility_dict.items():
             progress_bar = True if 'fb' in key else False
             self.log(f'val_{key}', utility.compute(), prog_bar=progress_bar)
-            wandb.log({f'val_{key}': utility.compute()})
+            wandb.log({f'val_{key}': utility.compute()}, step=self.current_epoch)
 
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
         self.log('test_set_size', self.test_set_size.compute())
         self.log('test_multiclass_acc', self.test_multiclass_acc.compute())
-        wandb.log({'test_set_size': self.test_set_size.compute()})
-        wandb.log({'test_acc': self.test_acc.compute()})
+        wandb.log({'test_set_size': self.test_set_size.compute()}, step=self.current_epoch)
+        wandb.log({'test_acc': self.test_acc.compute()}, step=self.current_epoch)
         for key, utility in self.test_utility_dict.items():
             self.log(f'test_utility_{key}', utility.compute())
-            wandb.log({f'test_{key}': utility.compute()})
+            wandb.log({f'test_{key}': utility.compute()}, step=self.current_epoch)
         self.cor_unc_plot.plot()
         self.hyper_uncertainty_plot.plot()
         self.test_set_size.plot()

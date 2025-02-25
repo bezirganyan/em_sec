@@ -53,16 +53,16 @@ class CIFAR10EnnModel(pl.LightningModule):
 
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute())
-        wandb.log({'train_acc': self.train_acc.compute()})
+        wandb.log({'train_acc': self.train_acc.compute()}, step=self.current_epoch)
 
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
-        wandb.log({'val_acc': self.val_acc.compute()})
+        wandb.log({'val_acc': self.val_acc.compute()}, step=self.current_epoch)
 
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
         self.cor_unc_plot.plot()
-        wandb.log({'test_acc': self.test_acc.compute()})
+        wandb.log({'test_acc': self.test_acc.compute()}, step=self.current_epoch)
 
     def configure_optimizers(self):
         optimizer = Adam(self.parameters(), lr=self.learning_rate)

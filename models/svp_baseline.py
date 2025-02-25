@@ -81,20 +81,20 @@ class CIFAR10SVPModel(pl.LightningModule):
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
         self.log('val_set_size', self.val_set_size.compute(), prog_bar=True)
-        wandb.log({"val_set_size": self.val_set_size.compute()})
-        wandb.log({"val_acc": self.val_acc.compute()})
+        wandb.log({"val_set_size": self.val_set_size.compute()}, step=self.current_epoch)
+        wandb.log({"val_acc": self.val_acc.compute()}, step=self.current_epoch)
         for k, v in self.val_utility_dict.items():
             self.log(f'val_{k}', v.compute())
-            wandb.log({f'val_{k}': v.compute()})
+            wandb.log({f'val_{k}': v.compute()}, step=self.current_epoch)
 
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
         self.log('test_set_size', self.test_set_size.compute())
-        wandb.log({"test_set_size": self.test_set_size.compute()})
-        wandb.log({"test_acc": self.test_acc.compute()})
+        wandb.log({"test_set_size": self.test_set_size.compute()}, step=self.current_epoch)
+        wandb.log({"test_acc": self.test_acc.compute()}, step=self.current_epoch)
         for k, v in self.test_utility_dict.items():
             self.log(f'test_{k}', v.compute())
-            wandb.log({f'test_{k}': v.compute()})
+            wandb.log({f'test_{k}': v.compute()}, step=self.current_epoch)
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=self.hparams.learning_rate)
