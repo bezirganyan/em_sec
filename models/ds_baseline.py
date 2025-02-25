@@ -3,7 +3,7 @@ import torch
 import pytorch_lightning as pl
 import torch.nn as nn
 import torch.nn.functional as F
-from models.fitnet import FitNet4
+from models.conv_models import FitNet4
 import torchvision.models as models
 from torch.optim import Adam
 from torchmetrics import Accuracy

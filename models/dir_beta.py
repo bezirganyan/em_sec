@@ -1,6 +1,3 @@
-from math import gamma
-
-import matplotlib.pyplot as plt
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -8,26 +5,27 @@ import torch.nn.functional as F
 import torchvision.models as models
 import wandb
 from torch.optim import Adam
+from torcheval.metrics import MulticlassAccuracy
 
-from losses import ava_edl_criterion, get_equivalence_loss, get_evidential_hyperloss, get_evidential_loss, \
-    get_utility_loss
+from losses import ava_edl_criterion, get_evidential_loss
 from metrics import AverageUtility, CorrectIncorrectUncertaintyPlotter, HyperAccuracy, HyperSetSize, \
     HyperUncertaintyPlotter
-from torcheval.metrics import MulticlassAccuracy
-import seaborn as sns
+from models.conv_models import BasicBlock, ResNet
+
 
 class CIFAR10HyperModel(pl.LightningModule):
     def __init__(self, num_classes=10, learning_rate=1e-3, beta=1):
         super(CIFAR10HyperModel, self).__init__()
         self.save_hyperparameters()
+        self.learning_rate = learning_rate
         self.beta_param = beta
-        self.model = models.resnet18(pretrained=False)
+        self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
         self.num_classes = num_classes
-        self.alpha = nn.Linear(self.model.fc.in_features, num_classes)
-        self.beta = nn.Linear(self.model.fc.in_features, num_classes)
-        self.multinomial_evidence_collector = nn.Linear(self.model.fc.in_features, num_classes)
-        self.hyper_evidence_collector = nn.Linear(num_classes * 2, num_classes + 1)
-        self.model.fc = nn.Identity()
+        self.alpha = nn.Linear(self.model.linear.in_features, num_classes)
+        self.beta = nn.Linear(self.model.linear.in_features, num_classes)
+        self.multinomial_evidence_collector = nn.Linear(self.model.linear.in_features, num_classes)
+        # self.hyper_evidence_collector = nn.Linear(num_classes * 2, num_classes + 1)
+        self.model.linear = nn.Identity()
         self.set_metrics()
 
     def forward(self, x):
@@ -36,11 +34,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         beta = self.beta(logits)
         multinomial_evidence = self.multinomial_evidence_collector(logits)
 
-        ev_diff = torch.relu(alpha - beta)
-        # logits_unfused = torch.relu(torch.cat([multinomial_evidence, ev_diff], dim=1))
-        logits_unfused = torch.cat([multinomial_evidence, ev_diff], dim=1)
-        hyper_evidence = self.hyper_evidence_collector(logits_unfused)
-        return alpha, beta, hyper_evidence, multinomial_evidence
+        return alpha, beta, multinomial_evidence
 
     @staticmethod
     def make_binomial_opinion(evidence_a, evidence_b, base_rate=0.5):
@@ -59,59 +53,15 @@ class CIFAR10HyperModel(pl.LightningModule):
 
         return b, d, u, a
 
-    @staticmethod
-    def binomial_disjunction(bx, dx, ux, ax, by, dy, uy, ay):
-        """
-        Perform binomial comultiplication (disjunction) on two binomial opinions:
-          ωx = (bx, dx, ux, ax)
-          ωy = (by, dy, uy, ay)
-        Returns: (b_xy, d_xy, u_xy, a_xy)
-        following the standard subjective logic disjunction formula.
-        """
-        a_xy = ax + ay - ax * ay
-        b_xy = bx + by - bx * by
-
-        eps = 1e-10
-        denom = a_xy + eps  # to avoid division-by-zero
-
-        # d_{x∨y}
-        # = d_x d_y + [ (1-ax)*ay*bx*d_y + (1-ay)*ax*d_x*by ] / (ax + ay - ax*ay)
-        part_num = (1 - ax) * ay * bx * dy + (1 - ay) * ax * dx * by
-        d_xy = dx * dy + part_num / denom
-
-        # u_{x∨y} = (d_x u_y + d_y u_x) / (ax + ay - ax*ay)
-        u_xy = (dx * uy + dy * ux) / denom
-
-        return b_xy, d_xy, u_xy, a_xy
-
-    def comultiply_all(self, b_list, d_list, u_list, a_list):
-        """
-        Reduce a list of binomial opinions [ (b1,d1,u1,a1), (b2,d2,u2,a2), ... ]
-        by iteratively applying binomial_disjunction.
-        """
-        # Start with the first opinion
-        b_acc = b_list[0]
-        d_acc = d_list[0]
-        u_acc = u_list[0]
-        a_acc = a_list[0]
-
-        # Iteratively combine
-        for i in range(1, len(b_list)):
-            b_acc, d_acc, u_acc, a_acc = self.binomial_disjunction(
-                b_acc, d_acc, u_acc, a_acc,
-                b_list[i], d_list[i], u_list[i], a_list[i]
-            )
-        return b_acc, d_acc, u_acc, a_acc
-
     def shared_step(self, batch, batch_idx):
         x, y = batch
         y = F.one_hot(y, self.num_classes)
-        logits_a, logits_b, logits, multinomial_logits = self(x)
-        evidence_a = F.elu(logits_a) + 2 # TODO - in the original implementation, they add 2, but it's not clear why, check this later
+        logits_a, logits_b, multinomial_logits = self(x)
+        evidence_a = F.elu(
+            logits_a) + 2  # TODO - in the original implementation, they add 2, but it's not clear why, check this later
         evidence_b = F.elu(logits_b) + 2
         multinomial_evidence = torch.exp(multinomial_logits)
-        # evidence_hyper = torch.exp(logits)
-        loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y)
+        loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y, self.beta_param)
         multilabel_probs = evidence_a / (evidence_a + evidence_b)
         hyperset = (evidence_a > evidence_b).int()
 
@@ -120,7 +70,8 @@ class CIFAR10HyperModel(pl.LightningModule):
         prod_selected = masked_factors.prod(dim=1)
         final_b = 1 - prod_selected
 
-        loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10, self.device, targets_one_hot=True)
+        loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10,
+                                       self.device, targets_one_hot=True)
 
         multinomial_uncertainty = self.num_classes / (multinomial_evidence + 1).sum(dim=1, keepdim=True)
         multiomial_beliefs = multinomial_evidence / (multinomial_evidence + 1).sum(dim=1, keepdim=True)
@@ -128,11 +79,12 @@ class CIFAR10HyperModel(pl.LightningModule):
         remaining_unc = multinomial_uncertainty * (1 - final_b.unsqueeze(-1))
         hypernomial_beleifs = torch.cat([multiomial_beliefs, set_beliefs_scaled], dim=1)
         evidence_hyper = (self.num_classes + 1) * hypernomial_beleifs / (remaining_unc + 1e-6)
-        loss = loss_multilabel + loss_edl # + gamma * (hyper_loss_edl + eqv_loss + utility)
+        loss = loss_multilabel + loss_edl  # + gamma * (hyper_loss_edl + eqv_loss + utility)
         return loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, multilabel_probs
 
     def training_step(self, batch, batch_idx):
-        loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
+        loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(batch,
+                                                                                                           batch_idx)
         self.log('train_loss', loss, prog_bar=True)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
@@ -142,7 +94,8 @@ class CIFAR10HyperModel(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
+        loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(batch,
+                                                                                                           batch_idx)
         self.log('val_loss', loss, prog_bar=True)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
@@ -165,10 +118,9 @@ class CIFAR10HyperModel(pl.LightningModule):
                 utility.to(self.device)
             utility.update(pred_sets, y)
 
-
-
     def test_step(self, batch, batch_idx):
-        loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(batch, batch_idx)
+        loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(batch,
+                                                                                                           batch_idx)
         self.log('test_loss', loss)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
@@ -194,11 +146,11 @@ class CIFAR10HyperModel(pl.LightningModule):
                 utility.to(self.device)
             utility.update(pred_sets, y)
 
-
-
     def on_train_epoch_end(self) -> None:
-        self.log('train_acc', self.train_acc.compute())
+        self.log('train_acc', self.train_acc.compute(), prog_bar=True)
         self.log('train_set_size', self.train_set_size.compute())
+        wandb.log({'train_set_size': self.train_set_size.compute()})
+        wandb.log({'train_acc': self.train_acc.compute()})
 
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
@@ -226,7 +178,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.test_set_size.plot()
 
     def configure_optimizers(self):
-        return Adam(self.parameters(), lr=self.hparams.learning_rate)
+        return Adam(self.parameters(), lr=self.learning_rate)
 
     def set_metrics(self):
         self.train_acc = HyperAccuracy()
@@ -258,7 +210,6 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.train_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
         self.val_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
         self.test_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
-
 
         self.cor_unc_plot = CorrectIncorrectUncertaintyPlotter()
         self.hyper_uncertainty_plot = HyperUncertaintyPlotter()
