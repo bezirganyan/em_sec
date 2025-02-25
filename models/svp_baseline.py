@@ -9,24 +9,28 @@ from torchmetrics import Accuracy
 from svp.multiclass import SVPNet
 
 from metrics import AverageUtility, SetSize
+from models.conv_models import BasicBlock, ResNet
 
 
 class CIFAR10SVPModel(pl.LightningModule):
     def __init__(self, num_classes=10, learning_rate=1e-3, beta=1):
         super(CIFAR10SVPModel, self).__init__()
         self.save_hyperparameters()
-        self.model = models.resnet18(pretrained=False)
+        self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
         self.num_classes = num_classes
         self.beta_param = beta
-        hs = self.model.fc.in_features
-        self.model.fc = nn.Identity()
+        hs = self.model.linear.in_features
+        self.model.linear = nn.Identity()
         self.set_metrics()
         self.set_params = {
             "c": 10,
             "svptype": "fb",
             "beta": self.beta_param
         }
-        self.flat = SVPNet(phi=self.model, hidden_size=hs, classes=list(range(num_classes)), hierarchy="none")
+        try:
+            self.flat = SVPNet(phi=self.model, hidden_size=hs, classes=list(range(num_classes)), hierarchy="none")
+        except TypeError:
+            self.flat = SVPNet(phi=self.model, hidden_size=hs, classes=list(range(num_classes)), hierarchy="none", dropout=0.0)
 
     def forward(self, x, y=None):
         return self.flat(x, y)
@@ -101,7 +105,11 @@ class CIFAR10SVPModel(pl.LightningModule):
         self.test_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
 
         self.val_utility_dict = {
-            'fb': AverageUtility(self.num_classes, utility='fb', beta=self.beta_param),
+            'fb_1': AverageUtility(self.num_classes, utility='fb', beta=1),
+            'fb_2': AverageUtility(self.num_classes, utility='fb', beta=2),
+            'fb_3': AverageUtility(self.num_classes, utility='fb', beta=3),
+            'fb_4': AverageUtility(self.num_classes, utility='fb', beta=4),
+            'fb_5': AverageUtility(self.num_classes, utility='fb', beta=5),
             'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
             'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
             'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
@@ -110,7 +118,11 @@ class CIFAR10SVPModel(pl.LightningModule):
         }
 
         self.test_utility_dict = {
-            'fb': AverageUtility(self.num_classes, utility='fb', beta=self.beta_param),
+            'fb_1': AverageUtility(self.num_classes, utility='fb', beta=1),
+            'fb_2': AverageUtility(self.num_classes, utility='fb', beta=2),
+            'fb_3': AverageUtility(self.num_classes, utility='fb', beta=3),
+            'fb_4': AverageUtility(self.num_classes, utility='fb', beta=4),
+            'fb_5': AverageUtility(self.num_classes, utility='fb', beta=5),
             'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
             'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
             'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
