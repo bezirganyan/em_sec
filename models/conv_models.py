@@ -131,6 +131,10 @@ class Bottleneck(nn.Module):
 
 
 class ResNet(nn.Module):
+    '''
+    ResNet for CIFAR dataset. Implementation is taken from https://github.com/kuangliu/pytorch-cifar
+    '''
+
     def __init__(self, block, num_blocks, num_classes=10):
         super(ResNet, self).__init__()
         self.in_planes = 64

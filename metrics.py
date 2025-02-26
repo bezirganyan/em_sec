@@ -419,3 +419,70 @@ class BetaEvidenceAccumulator(Metric):
         beta = torch.cat(self.beta).to('cpu')
         labels = torch.cat(self.labels).to('cpu')
         torch.save((alpha, beta, labels), path)
+
+
+def eval_calibration(predictions, confidences, labels, device, M=15):
+    """
+    function adapted from: https://github.com/Cogito2012/DEAR/
+    M: number of bins for confidence scores
+    """
+    num_Bm = torch.zeros((M,), dtype=torch.int32, device=device)
+    accs = torch.zeros((M,), dtype=torch.float32, device=device)
+    confs = torch.zeros((M,), dtype=torch.float32, device=device)
+    for m in range(M):
+        interval = [m / M, (m + 1) / M]
+        Bm = torch.where((confidences > interval[0]) & (confidences <= interval[1]))[0]
+        if len(Bm) > 0:
+            acc_bin = torch.sum(predictions[Bm] == labels[Bm]).item() / len(Bm)
+            conf_bin = torch.mean(confidences[Bm]).item()
+            # gather results
+            num_Bm[m] = len(Bm)
+            accs[m] = acc_bin
+            confs[m] = conf_bin
+    conf_intervals = torch.arange(0, 1, 1 / M).to(device)
+    return accs, confs, num_Bm, conf_intervals
+
+class ExpectedCalibrationError(Metric):
+    def __init__(self, num_classes, M=15, **kwargs):
+        super(ExpectedCalibrationError, self).__init__(**kwargs)
+        self.add_state('accs', default=torch.tensor([]), dist_reduce_fx='cat')
+        self.add_state('confs', default=torch.tensor([]), dist_reduce_fx='cat')
+        self.add_state('num_Bm', default=torch.tensor([]), dist_reduce_fx='cat')
+        self.add_state('conf_intervals', default=torch.tensor([]), dist_reduce_fx='cat')
+        self.M = M
+        self.num_classes = num_classes
+
+    def update(self, evidences, labels):
+        predictions = evidences.argmax(dim=1)
+        uncertainties = evidences.shape[1] / (evidences + 1).sum(dim=1)
+        confidences = 1 - uncertainties
+        accs, confs, num_Bm, conf_intervals = eval_calibration(predictions, confidences, labels, labels.device, M=self.M)
+        self.accs = torch.cat((self.accs, accs))
+        self.confs = torch.cat((self.confs, confs))
+        self.num_Bm = torch.cat((self.num_Bm, num_Bm))
+        self.conf_intervals = torch.cat((self.conf_intervals, conf_intervals))
+
+    def merge_state(self, metrics):
+        for metric in metrics:
+            self.accs = torch.cat((self.accs, metric.accs))
+            self.confs = torch.cat((self.confs, metric.confs))
+            self.num_Bm = torch.cat((self.num_Bm, metric.num_Bm))
+            self.conf_intervals = torch.cat((self.conf_intervals, metric.conf_intervals))
+
+    def compute(self):
+        return torch.sum(torch.abs(self.accs - self.confs) * self.num_Bm / torch.sum(self.num_Bm))
+
+    def plot(self):
+        accs = self.accs.cpu().numpy()
+        confs = self.confs.cpu().numpy()
+        num_Bm = self.num_Bm.cpu().numpy()
+        conf_intervals = self.conf_intervals.cpu().numpy()
+
+        plt.plot(conf_intervals, accs, label='Accuracy')
+        plt.plot(conf_intervals, confs, label='Confidence')
+        plt.plot(conf_intervals, num_Bm, label='Number of samples')
+        plt.xlabel('Confidence')
+        plt.ylabel('Value')
+        plt.title('Expected Calibration Error')
+        plt.legend()
+        plt.show()

@@ -8,7 +8,7 @@ from torch.optim import Adam
 from torchmetrics import Accuracy, CalibrationError
 
 from losses import get_evidential_loss
-from metrics import CorrectIncorrectUncertaintyPlotter
+from metrics import CorrectIncorrectUncertaintyPlotter, ExpectedCalibrationError
 from models.conv_models import BasicBlock, ResNet
 
 
@@ -52,7 +52,7 @@ class CIFAR10EnnModel(pl.LightningModule):
         y_hat = torch.argmax(logits, dim=1)
         self.test_acc(y_hat, y)
         self.cor_unc_plot.update(torch.exp(logits), y)
-        self.test_ece.update(logits, y)
+        self.test_ece.update(torch.exp(logits), y)
 
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute())
@@ -77,6 +77,6 @@ class CIFAR10EnnModel(pl.LightningModule):
         self.train_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
         self.val_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
         self.test_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
-        self.test_ece = CalibrationError(task='multiclass', num_classes=self.num_classes)
+        self.test_ece = ExpectedCalibrationError(num_classes=self.num_classes)
 
         self.cor_unc_plot = CorrectIncorrectUncertaintyPlotter()
