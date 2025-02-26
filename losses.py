@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from sentry_sdk.utils import epoch
 from torch import digamma
 from torch.distributions.constraints import multinomial
 
@@ -107,12 +108,16 @@ def get_dc_loss(evidences, device):
     return dc_sum
 
 
-def get_evidential_loss(evidence, target, epoch_num, num_classes, annealing_step, device, targets_one_hot=False):
+def get_evidential_loss(evidence, target, epoch_num, num_classes, annealing_step, device, targets_one_hot=False,
+                        uncertainty_calibration=False):
     if not targets_one_hot:
         target = F.one_hot(target, num_classes)
     alpha_a = evidence + 1
     loss_acc = edl_digamma_loss(alpha_a, target, epoch_num, num_classes, annealing_step, device)
-    return loss_acc
+    if not uncertainty_calibration:
+        return loss_acc
+    calibration_loss = uncertainty_calibration_loss(evidence, target, 0.001, epoch_num, 200)
+    return loss_acc + calibration_loss
 
 
 def belief_matching(alphas, ys):
@@ -256,3 +261,17 @@ def get_utility_loss(evidence, multilabel_probs, target, beta, device):
     utility_loss = torch.mean(utility_abs)
     # return -utility_loss
     return 0
+
+
+def uncertainty_calibration_loss(evidence, target, annealing_factor, epoch_num, total_epochs):
+    num_classes = evidence.shape[1]
+    eps = 1e-10
+    uncertainty = num_classes / (evidence + 1).sum(dim=1, keepdim=True)
+    annealing_factor = torch.tensor(annealing_factor).to(evidence.device)
+    probs = (evidence + 1) / (evidence + 1).sum(dim=1, keepdim=True)
+    corrects = (target.argmax(dim=1) == probs.argmax(dim=1)).float().reshape(-1, 1)
+    lambda_t = annealing_factor * torch.exp(-epoch_num * (torch.log(annealing_factor) / total_epochs))
+    probs = torch.max(probs, dim=1).values.reshape(-1, 1)
+    corr_loss = - lambda_t * probs * torch.log(1 - uncertainty + eps) * corrects
+    incor_loss =  (1 - lambda_t) * ((1 - probs) * torch.log(uncertainty + eps) * (1 - corrects))
+    return torch.mean(corr_loss + incor_loss)

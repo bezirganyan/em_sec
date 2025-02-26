@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument('--model', type=str, default='cnn')
     parser.add_argument('--beta', type=float, default=1)
     parser.add_argument('--enable-wandb', action='store_true', default=False)
+    parser.add_argument('--unc-calib', action='store_true', default=False)
 
     return parser.parse_args()
 
@@ -44,7 +45,7 @@ def main():
     if args.model == 'cnn':
         model = CIFAR10Model(num_classes=args.num_classes, learning_rate=args.learning_rate)
     elif args.model == 'enn':
-        model = CIFAR10EnnModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
+        model = CIFAR10EnnModel(num_classes=args.num_classes, learning_rate=args.learning_rate, uncertainty_calibration=args.unc_calib)
     elif args.model == 'beta':
         model = CIFAR10BettaModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
     elif args.model == 'hyper':
