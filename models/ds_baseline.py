@@ -3,12 +3,12 @@ import torch
 import pytorch_lightning as pl
 import torch.nn as nn
 import torch.nn.functional as F
-from models.conv_models import FitNet4
+from models.conv_models import BasicBlock, FitNet4, ResNet
 import torchvision.models as models
 from torch.optim import Adam
 from torchmetrics import Accuracy
 
-from models.ds_utils import DM, Dempster_Shafer_module
+from models.ds_utils import DM, DSNet
 
 
 class CIFAR10DSModel(pl.LightningModule):
@@ -16,27 +16,27 @@ class CIFAR10DSModel(pl.LightningModule):
         super(CIFAR10DSModel, self).__init__()
         self.learning_rate = learning_rate
         self.save_hyperparameters()
-        self.model = FitNet4(pretrained=False, dropout=0.1)
+        self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
         self.num_classes = num_classes
-        # self.DS = Dempster_Shafer_module(self.model.fc.in_features, num_classes, prototypes)
-        self.utility = DM(num_classes, 0.9)
-        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+        self.DS = DSNet(prototypes, num_classes, self.model.linear.in_features)
+        self.model.linear = nn.Identity()
         self.set_metrics()
 
     def forward(self, x):
         features = self.model(x)
-        # mass_Dempster_normalize = self.DS(features)
-        evidences = F.elu(features)
-        beliefs = evidences / (evidences + 1).sum(dim=1, keepdim=True)
-        uncertainty = self.num_classes / (evidences + 1).sum(dim=1, keepdim=True)
-        mass_Dempster_normalize = torch.cat([beliefs, uncertainty], dim=1)
-        outputs = self.utility(mass_Dempster_normalize)
+        outputs = self.DS(features)
+        # evidences = F.elu(mass_Dempster_normalize)
+        # beliefs = evidences / (evidences + 1).sum(dim=1, keepdim=True)
+        # uncertainty = self.num_classes / (evidences + 1).sum(dim=1, keepdim=True)
+        # mass_Dempster_normalize = torch.cat([beliefs, uncertainty], dim=1)
+        # outputs = self.utility(mass_Dempster_normalize)
         return outputs
 
     def training_step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
-        loss = F.cross_entropy(y_hat, y)
+        log_probs = torch.log(y_hat + 1e-8)
+        loss = F.nll_loss(log_probs, y)
         self.log('train_loss', loss, prog_bar=True)
         self.train_acc(y_hat, y)
         return loss
