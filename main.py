@@ -38,7 +38,7 @@ def main():
     args = parse_args()
 
     wandb_mode = 'online' if args.enable_wandb else 'disabled'
-    wandb_name = f"{args.model}_cifar10_{args.beta}_beta_{args.epochs}_epochs_{args.learning_rate}_lr"
+    wandb_name = f"{args.model}_{args.dataset}_{args.beta}_beta_{args.epochs}_epochs_{args.learning_rate}_lr"
     wandb.init(project='VagueFusion', name=wandb_name, config=vars(args), mode=wandb_mode)
 
     num_classes = None
