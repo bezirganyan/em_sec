@@ -6,7 +6,7 @@ import torchvision.models as models
 import wandb
 from torch.optim import Adam
 from torchmetrics import Accuracy
-from svp.multiclass import SVPNet
+from svp_py.multiclass import SVPNet
 
 from metrics import AverageUtility, SetSize
 from models.conv_models import BasicBlock, ResNet
@@ -23,7 +23,7 @@ class CIFAR10SVPModel(pl.LightningModule):
         self.model.linear = nn.Identity()
         self.set_metrics()
         self.set_params = {
-            "c": 10,
+            "c": self.num_classes,
             "svptype": "fb",
             "beta": self.beta_param
         }
@@ -41,7 +41,7 @@ class CIFAR10SVPModel(pl.LightningModule):
         self.log('train_loss', loss)
         y_hat = torch.tensor(self.flat.predict(x)).to(y.device)
         self.train_acc(y_hat, y)
-        svp_preds_f = self.flat.predict_set(x, self.set_params)
+        # svp_preds_f = self.flat.predict_set(x, self.set_params)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -62,10 +62,10 @@ class CIFAR10SVPModel(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         x, y = batch
-        loss = self(x, y)
-        self.log('test_loss', loss)
-        y_hat = torch.tensor(self.flat.predict(x)).to(y.device)
-        self.test_acc(y_hat, y)
+        # loss = self(x, y)
+        # self.log('test_loss', loss)
+        # y_hat = torch.tensor(self.flat.predict(x)).to(y.device)
+        # self.test_acc(y_hat, y)
         svp_preds_f = self.flat.predict_set(x, self.set_params)
         svp_preds_f = [torch.tensor(p).to(y.device) for p in svp_preds_f]
         y_one_hot = F.one_hot(y, self.num_classes)
@@ -110,11 +110,11 @@ class CIFAR10SVPModel(pl.LightningModule):
             'fb_3': AverageUtility(self.num_classes, utility='fb', beta=3),
             'fb_4': AverageUtility(self.num_classes, utility='fb', beta=4),
             'fb_5': AverageUtility(self.num_classes, utility='fb', beta=5),
-            'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
-            'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
-            'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
-            'owa_0.8': AverageUtility(self.num_classes, utility='owa', tolerance=0.8),
-            'owa_0.9': AverageUtility(self.num_classes, utility='owa', tolerance=0.9)
+            # 'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
+            # 'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
+            # 'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
+            # 'owa_0.8': AverageUtility(self.num_classes, utility='owa', tolerance=0.8),
+            # 'owa_0.9': AverageUtility(self.num_classes, utility='owa', tolerance=0.9)
         }
 
         self.test_utility_dict = {
@@ -123,11 +123,11 @@ class CIFAR10SVPModel(pl.LightningModule):
             'fb_3': AverageUtility(self.num_classes, utility='fb', beta=3),
             'fb_4': AverageUtility(self.num_classes, utility='fb', beta=4),
             'fb_5': AverageUtility(self.num_classes, utility='fb', beta=5),
-            'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
-            'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
-            'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
-            'owa_0.8': AverageUtility(self.num_classes, utility='owa', tolerance=0.8),
-            'owa_0.9': AverageUtility(self.num_classes, utility='owa', tolerance=0.9)
+            # 'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
+            # 'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
+            # 'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
+            # 'owa_0.8': AverageUtility(self.num_classes, utility='owa', tolerance=0.8),
+            # 'owa_0.9': AverageUtility(self.num_classes, utility='owa', tolerance=0.9)
         }
 
         self.val_set_size = SetSize()
