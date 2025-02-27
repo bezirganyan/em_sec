@@ -498,3 +498,28 @@ class ExpectedCalibrationError(Metric):
         plt.title('Expected Calibration Error')
         plt.legend()
         plt.show()
+
+
+class TimeLogger(Metric):
+    def __init__(self, reduction='sum', **kwargs):
+        super(TimeLogger, self).__init__(**kwargs)
+        self.add_state('times', default=torch.tensor([]), dist_reduce_fx='cat')
+        self.reduction = reduction
+
+    def update(self, time):
+        self.times = torch.cat((self.times, torch.tensor([time], device=self.device)))
+
+    def merge_state(self, metrics):
+        for metric in metrics:
+            self.times = torch.cat((self.times, metric.times))
+
+    def compute(self):
+        if self.reduction == 'sum':
+            return self.times.sum()
+        elif self.reduction == 'mean':
+            return self.times.mean()
+        else:
+            raise ValueError(f"Unknown reduction method: {self.reduction}")
+
+    def save(self, path):
+        torch.save(self.times, path)

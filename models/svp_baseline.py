@@ -8,8 +8,9 @@ from torch.optim import Adam
 from torchmetrics import Accuracy
 from svp_py.multiclass import SVPNet
 
-from metrics import AverageUtility, SetSize
+from metrics import AverageUtility, SetSize, TimeLogger
 from models.conv_models import BasicBlock, ResNet
+import time
 
 
 class CIFAR10SVPModel(pl.LightningModule):
@@ -62,11 +63,14 @@ class CIFAR10SVPModel(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         x, y = batch
-        # loss = self(x, y)
-        # self.log('test_loss', loss)
-        # y_hat = torch.tensor(self.flat.predict(x)).to(y.device)
-        # self.test_acc(y_hat, y)
+        loss = self(x, y)
+        self.log('test_loss', loss)
+        y_hat = torch.tensor(self.flat.predict(x)).to(y.device)
+        self.test_acc(y_hat, y)
+        start_time = time.time()
         svp_preds_f = self.flat.predict_set(x, self.set_params)
+        duration = time.time() - start_time
+        self.test_time_logger.update(duration)
         svp_preds_f = [torch.tensor(p).to(y.device) for p in svp_preds_f]
         y_one_hot = F.one_hot(y, self.num_classes)
         self.test_set_size.update(svp_preds_f, y_one_hot)
@@ -90,8 +94,10 @@ class CIFAR10SVPModel(pl.LightningModule):
     def on_test_epoch_end(self) -> None:
         self.log('test_acc', self.test_acc.compute())
         self.log('test_set_size', self.test_set_size.compute())
+        self.log('test_time', self.test_time_logger.compute())
         wandb.log({"test_set_size": self.test_set_size.compute()}, step=self.current_epoch)
         wandb.log({"test_acc": self.test_acc.compute()}, step=self.current_epoch)
+        wandb.log({"test_time": self.test_time_logger.compute()}, step=self.current_epoch)
         for k, v in self.test_utility_dict.items():
             self.log(f'test_{k}', v.compute())
             wandb.log({f'test_{k}': v.compute()}, step=self.current_epoch)
@@ -132,3 +138,4 @@ class CIFAR10SVPModel(pl.LightningModule):
 
         self.val_set_size = SetSize()
         self.test_set_size = SetSize()
+        self.test_time_logger = TimeLogger()
