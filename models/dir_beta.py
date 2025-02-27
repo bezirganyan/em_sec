@@ -1,3 +1,5 @@
+import time
+
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -9,7 +11,7 @@ from torcheval.metrics import MulticlassAccuracy
 
 from losses import ava_edl_criterion, get_evidential_loss
 from metrics import AverageUtility, CorrectIncorrectUncertaintyPlotter, HyperAccuracy, HyperSetSize, \
-    HyperUncertaintyPlotter
+    HyperUncertaintyPlotter, TimeLogger
 from models.conv_models import BasicBlock, ResNet
 
 
@@ -29,57 +31,44 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.set_metrics()
 
     def forward(self, x):
+        # Compute logits and apply ReLU.
         logits = torch.relu(self.model(x))
+
         alpha = self.alpha(logits)
         beta = self.beta(logits)
-        multinomial_evidence = self.multinomial_evidence_collector(logits)
+        evidence_a = F.elu(alpha) + 2  # As in the original implementation.
+        evidence_b = F.elu(beta) + 2
 
-        return alpha, beta, multinomial_evidence
+        multinomial_evidence = torch.exp(self.multinomial_evidence_collector(logits))
 
-    @staticmethod
-    def make_binomial_opinion(evidence_a, evidence_b, base_rate=0.5):
-        """
-        Convert raw evidence (evidence_a, evidence_b) into
-        binomial opinions (b, d, u, a) for each entry.
-        Shapes of evidence_a, evidence_b: (batch_size, num_classes).
-        """
-        # We add 1 to the denominator to avoid division by zero
-        total = evidence_a + evidence_b + 1.0
+        mask = evidence_a > evidence_b
 
-        b = evidence_a / total
-        d = evidence_b / total
-        u = 1.0 - b - d
-        a = torch.full_like(b, base_rate)  # broadcast base_rate across all entries
+        b = evidence_a / (evidence_a + evidence_b + 1)
 
-        return b, d, u, a
+        masked_factors = torch.where(mask, 1 - b, torch.ones_like(b))
+        prod_selected = masked_factors.prod(dim=1)
+        final_b = 1 - prod_selected
+
+        evidence_sum = (multinomial_evidence + 1).sum(dim=1, keepdim=True)
+        multinomial_uncertainty = self.num_classes / evidence_sum
+        multiomial_beliefs = multinomial_evidence / evidence_sum
+
+        set_beliefs_scaled = multinomial_uncertainty * final_b.unsqueeze(-1)
+        remaining_unc = multinomial_uncertainty * (1 - final_b.unsqueeze(-1))
+        hypernomial_beliefs = torch.cat([multiomial_beliefs, set_beliefs_scaled], dim=1)
+        evidence_hyper = (self.num_classes + 1) * hypernomial_beliefs / (remaining_unc + 1e-6)
+
+        return evidence_a, evidence_b, multinomial_evidence, evidence_hyper
 
     def shared_step(self, batch, batch_idx):
         x, y = batch
         y = F.one_hot(y, self.num_classes)
-        logits_a, logits_b, multinomial_logits = self(x)
-        evidence_a = F.elu(
-            logits_a) + 2  # TODO - in the original implementation, they add 2, but it's not clear why, check this later
-        evidence_b = F.elu(logits_b) + 2
-        multinomial_evidence = torch.exp(multinomial_logits)
+        evidence_a, evidence_b, multinomial_evidence, evidence_hyper = self(x)
         loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y, self.beta_param)
-        multilabel_probs = evidence_a / (evidence_a + evidence_b)
-        hyperset = (evidence_a > evidence_b).int()
-
-        b, d, u, a = self.make_binomial_opinion(evidence_a, evidence_b)
-        masked_factors = torch.where(hyperset > 0.5, 1 - b, torch.ones_like(b))
-        prod_selected = masked_factors.prod(dim=1)
-        final_b = 1 - prod_selected
-
         loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10,
                                        self.device, targets_one_hot=True)
-
-        multinomial_uncertainty = self.num_classes / (multinomial_evidence + 1).sum(dim=1, keepdim=True)
-        multiomial_beliefs = multinomial_evidence / (multinomial_evidence + 1).sum(dim=1, keepdim=True)
-        set_beliefs_scaled = multinomial_uncertainty * final_b.unsqueeze(-1)
-        remaining_unc = multinomial_uncertainty * (1 - final_b.unsqueeze(-1))
-        hypernomial_beleifs = torch.cat([multiomial_beliefs, set_beliefs_scaled], dim=1)
-        evidence_hyper = (self.num_classes + 1) * hypernomial_beleifs / (remaining_unc + 1e-6)
         loss = loss_multilabel + loss_edl  # + gamma * (hyper_loss_edl + eqv_loss + utility)
+        multilabel_probs = evidence_a / (evidence_a + evidence_b)
         return loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, multilabel_probs
 
     def training_step(self, batch, batch_idx):
@@ -127,24 +116,40 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.test_acc.update(y_hat, y, hyperset > 0.5)
         self.test_set_size.update(y_hat, hyperset > 0.5, y)
         self.test_multiclass_acc.update(multinomial_evidence.argmax(dim=1), y.argmax(dim=1))
-        y_hat_idx_idx = evidence_hyper.argmax(dim=1)
-        pred_sets = []
-        for i in range(y_hat.shape[0]):
-            if y_hat_idx_idx[i] < self.num_classes:
-                pred_set = [y_hat_idx_idx[i].item()]
-            else:
-                # Assuming hyperset[i] is a tensor of shape (num_classes,) where positive values indicate membership.
-                pred_set = torch.nonzero(hyperset[i] > 0.5, as_tuple=False).squeeze(-1).tolist()
-                # order the pred set by hyperset values in descending order
-                pred_set = sorted(pred_set, key=lambda x: hyperset[i][x], reverse=True)
-            pred_sets.append(pred_set)
 
+        time_start = time.time()
+        pred_sets = self.predict_set(batch[0], as_list=True)
+        duration = time.time() - time_start
+        self.test_time_logger_as_list.update(duration)
+
+        time_start = time.time()
+        y_hyper = self.predict_set(batch[0])
+        duration = time.time() - time_start
+        self.test_time_logger.update(duration)
         self.cor_unc_plot.update(multinomial_evidence, y.argmax(dim=1))
         self.hyper_uncertainty_plot.update(pred_sets, evidence_hyper, y)
         for utility in self.test_utility_dict.values():
             if utility.device != self.device:
                 utility.to(self.device)
             utility.update(pred_sets, y)
+
+    def predict_set(self, x, as_list=False):
+        evidence_a, evidence_b, multinomial_evidence, evidence_hyper = self(x)
+        y_hat = evidence_hyper.argmax(dim=1)
+        y_hat = F.one_hot(y_hat, self.num_classes + 1)
+        hyperset = (evidence_a > evidence_b).float()
+        y_hat_idx_idx = evidence_hyper.argmax(dim=1)
+        mask = y_hat_idx_idx == self.num_classes
+        y_hyper = multinomial_evidence.argmax(dim=1)
+        y_hyper = F.one_hot(y_hyper, self.num_classes).long()
+        y_hyper[mask] = (hyperset[mask] > 0.5).long()
+        if as_list:
+            rows, cols = y_hyper.nonzero(as_tuple=True)
+            _, counts = torch.unique_consecutive(rows, return_counts=True)
+            groups = torch.split(cols, tuple(counts.tolist()))
+            y_hyper = list(map(lambda x: x.tolist(), groups))
+
+        return y_hyper
 
     def on_train_epoch_end(self) -> None:
         self.log('train_acc', self.train_acc.compute(), prog_bar=True)
@@ -168,8 +173,12 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.log('test_acc', self.test_acc.compute())
         self.log('test_set_size', self.test_set_size.compute())
         self.log('test_multiclass_acc', self.test_multiclass_acc.compute())
+        self.log('test_time', self.test_time_logger.compute())
+        self.log('test_time_as_list', self.test_time_logger_as_list.compute())
         wandb.log({'test_set_size': self.test_set_size.compute()}, step=self.current_epoch)
         wandb.log({'test_acc': self.test_acc.compute()}, step=self.current_epoch)
+        wandb.log({'test_time': self.test_time_logger.compute()}, step=self.current_epoch)
+        wandb.log({'test_time_as_list': self.test_time_logger_as_list.compute()}, step=self.current_epoch)
         for key, utility in self.test_utility_dict.items():
             self.log(f'test_utility_{key}', utility.compute())
             wandb.log({f'test_{key}': utility.compute()}, step=self.current_epoch)
@@ -186,34 +195,34 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.test_acc = HyperAccuracy()
 
         self.val_utility_dict = {
-            'fb_1': AverageUtility(self.num_classes, utility='fb', beta=1),
-            'fb_2': AverageUtility(self.num_classes, utility='fb', beta=2),
-            'fb_3': AverageUtility(self.num_classes, utility='fb', beta=3),
-            'fb_4': AverageUtility(self.num_classes, utility='fb', beta=4),
-            'fb_5': AverageUtility(self.num_classes, utility='fb', beta=5),
-            'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
-            'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
-            'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
-            'owa_0.8': AverageUtility(self.num_classes, utility='owa', tolerance=0.8),
-            'owa_0.9': AverageUtility(self.num_classes, utility='owa', tolerance=0.9)
+            'fb_1': AverageUtility(self.num_classes, utility='fb', beta=1, as_list=True),
+            'fb_2': AverageUtility(self.num_classes, utility='fb', beta=2, as_list=True),
+            'fb_3': AverageUtility(self.num_classes, utility='fb', beta=3, as_list=True),
+            'fb_4': AverageUtility(self.num_classes, utility='fb', beta=4, as_list=True),
+            'fb_5': AverageUtility(self.num_classes, utility='fb', beta=5, as_list=True),
+            'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5, as_list=True),
+            'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6, as_list=True),
+            'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7, as_list=True),
+            'owa_0.8': AverageUtility(self.num_classes, utility='owa', tolerance=0.8, as_list=True),
+            'owa_0.9': AverageUtility(self.num_classes, utility='owa', tolerance=0.9, as_list=True)
         }
 
         self.test_utility_dict = {
-            'fb_1': AverageUtility(self.num_classes, utility='fb', beta=1),
-            'fb_2': AverageUtility(self.num_classes, utility='fb', beta=2),
-            'fb_3': AverageUtility(self.num_classes, utility='fb', beta=3),
-            'fb_4': AverageUtility(self.num_classes, utility='fb', beta=4),
-            'fb_5': AverageUtility(self.num_classes, utility='fb', beta=5),
-            'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5),
-            'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6),
-            'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7),
-            'owa_0.8': AverageUtility(self.num_classes, utility='owa', tolerance=0.8),
-            'owa_0.9': AverageUtility(self.num_classes, utility='owa', tolerance=0.9)
+            'fb_1': AverageUtility(self.num_classes, utility='fb', beta=1, as_list=True),
+            'fb_2': AverageUtility(self.num_classes, utility='fb', beta=2, as_list=True),
+            'fb_3': AverageUtility(self.num_classes, utility='fb', beta=3, as_list=True),
+            'fb_4': AverageUtility(self.num_classes, utility='fb', beta=4, as_list=True),
+            'fb_5': AverageUtility(self.num_classes, utility='fb', beta=5, as_list=True),
+            'owa_0.5': AverageUtility(self.num_classes, utility='owa', tolerance=0.5, as_list=True),
+            'owa_0.6': AverageUtility(self.num_classes, utility='owa', tolerance=0.6, as_list=True),
+            'owa_0.7': AverageUtility(self.num_classes, utility='owa', tolerance=0.7, as_list=True),
+            'owa_0.8': AverageUtility(self.num_classes, utility='owa', tolerance=0.8, as_list=True),
+            'owa_0.9': AverageUtility(self.num_classes, utility='owa', tolerance=0.9, as_list=True)
         }
 
-        self.train_set_size = HyperSetSize()
-        self.val_set_size = HyperSetSize()
-        self.test_set_size = HyperSetSize()
+        self.train_set_size = HyperSetSize(num_classes=self.num_classes)
+        self.val_set_size = HyperSetSize(num_classes=self.num_classes)
+        self.test_set_size = HyperSetSize(num_classes=self.num_classes)
 
         self.train_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
         self.val_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
@@ -221,3 +230,5 @@ class CIFAR10HyperModel(pl.LightningModule):
 
         self.cor_unc_plot = CorrectIncorrectUncertaintyPlotter()
         self.hyper_uncertainty_plot = HyperUncertaintyPlotter()
+        self.test_time_logger = TimeLogger()
+        self.test_time_logger_as_list = TimeLogger()

@@ -269,9 +269,10 @@ def get_fb_measure(inputs, targets, beta=1):
     return (utilities * corrects).sum()
 
 class AverageUtility(Metric):
-    def __init__(self, num_classes, utility='owa', tolerance=0.7, beta=1, **kwargs):
+    def __init__(self, num_classes, utility='owa', tolerance=0.7, beta=1, as_list=True, **kwargs):
         super(AverageUtility, self).__init__(**kwargs)
         # self.utility_matrix = utility_matrix
+        self.as_list = as_list
         self.add_state('utility', default=torch.tensor([0.]), dist_reduce_fx='sum')
         self.add_state('total', default=torch.tensor([0]), dist_reduce_fx='sum')
         self.num_classes = num_classes
@@ -296,6 +297,11 @@ class AverageUtility(Metric):
             raise ValueError(f"Unknown utility type: {utility}")
 
     def update(self, inputs, labels):
+        if not self.as_list:
+            rows, cols = inputs.nonzero(as_tuple=True)
+            _, counts = torch.unique_consecutive(rows, return_counts=True)
+            groups = torch.split(cols, tuple(counts.tolist()))
+            inputs = list(map(lambda x: x.tolist(), groups))
         utility = self.utility_f(inputs, labels)
         self.utility += utility
         n_inputs = len(inputs)
