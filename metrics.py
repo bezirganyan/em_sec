@@ -1,4 +1,5 @@
 import math
+import os
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,6 +7,7 @@ import seaborn as sns
 import torch
 from scipy.optimize import minimize
 from torchmetrics import Metric
+from tqdm import tqdm
 
 
 class PredictionSetSize(Metric):
@@ -54,13 +56,13 @@ class HyperAccuracy(Metric):
 
 
 class HyperSetSize(Metric):
-    def __init__(self, n_classes=10, **kwargs):
+    def __init__(self, num_classes=10, **kwargs):
         super(HyperSetSize, self).__init__(**kwargs)
         self.add_state('counts', default=torch.tensor([]), dist_reduce_fx='cat')
         self.add_state('multinomial_number', default=torch.tensor([0]), dist_reduce_fx='sum')
         self.add_state('hyper_counts', default=torch.tensor([]), dist_reduce_fx='cat')
-        self.add_state('corrects_sizes_vector', default=torch.zeros(n_classes + 2), dist_reduce_fx='sum')
-        self.add_state('incorrects_sizes_vector', default=torch.zeros(n_classes + 2), dist_reduce_fx='sum')
+        self.add_state('corrects_sizes_vector', default=torch.zeros(num_classes + 2), dist_reduce_fx='sum')
+        self.add_state('incorrects_sizes_vector', default=torch.zeros(num_classes + 2), dist_reduce_fx='sum')
 
     def update(self, input, hyper_set, target=None):
         set_sizes = input[:, :-1].sum(dim=1)
@@ -172,7 +174,7 @@ def compute_weights(num_class=10):
     weight_dict = {}
 
     # Loop over j from 2 to num_class (inclusive)
-    for j in range(2, num_class + 1):
+    for j in tqdm(range(2, num_class + 1)):
         num_weights = j
         # Initial guess for the weights
         ini_weights = np.random.rand(num_weights)
@@ -192,7 +194,7 @@ def compute_weights(num_class=10):
             )
 
             # Minimize the objective using SLSQP.
-            res = minimize(neg_entropy_criterion, ini_weights, method='SLSQP', options={'disp': True},
+            res = minimize(neg_entropy_criterion, ini_weights, method='SLSQP', options={'disp': False},
                            constraints=constraints)
 
             # Store the resulting weights.
@@ -276,7 +278,17 @@ class AverageUtility(Metric):
         self.tolerance = tolerance
         self.utility_type = utility
         if utility == 'owa':
-            weight_matrix = compute_weights(num_classes)
+            # check if cache directory has saved weights for the given number of classes
+            # if not, compute the weights and save them, if the cache directory does not exist, create it
+            if not os.path.exists('cache'):
+                os.makedirs('cache')
+            cache_file = f'cache/weights_{num_classes}.pt'
+            if os.path.exists(cache_file):
+                weight_matrix = torch.load(cache_file, weights_only=False)
+            else:
+                print(f"Computing weights for {num_classes} classes for OWA utility metric.")
+                weight_matrix = compute_weights(num_classes)
+                torch.save(weight_matrix, cache_file)
             self.utility_f = lambda x, y: total_utility(x, y, self.tolerance, weight_matrix)
         elif utility == 'fb':
             self.utility_f = lambda x, y: get_fb_measure(x, y, beta)

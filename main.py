@@ -2,7 +2,7 @@
 import argparse
 import wandb
 
-from dataset import CIFAR10DataModule
+from dataset import CIFAR100DataModule, CIFAR10DataModule
 from models.beta import CIFAR10BettaModel
 from models.cnn import CIFAR10Model
 
@@ -19,9 +19,9 @@ from utils import OnKeyboardInterruptCallback
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--dataset', type=str, default='cifar10')
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--data_dir', type=str, default='../data')
-    parser.add_argument('--num_classes', type=int, default=10)
     parser.add_argument('--learning_rate', type=float, default=1e-3)
     parser.add_argument('--log_interval_steps', type=int, default=100)
     parser.add_argument('--tensorboard_path', type=str, default='lightning_logs')
@@ -40,20 +40,29 @@ def main():
     wandb_name = f"{args.model}_cifar10_{args.beta}_beta_{args.epochs}_epochs_{args.learning_rate}_lr"
     wandb.init(project='VagueFusion', name=wandb_name, config=vars(args), mode=wandb_mode)
 
-    data = CIFAR10DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
+    num_classes = None
+    if args.dataset == 'cifar10':
+        data = CIFAR10DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
+        num_classes = 10
+    elif args.dataset == 'cifar100':
+        data = CIFAR100DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
+        num_classes = 100
+    else:
+        raise ValueError(f"Dataset {args.dataset} not supported")
     data.setup()
+
     if args.model == 'cnn':
-        model = CIFAR10Model(num_classes=args.num_classes, learning_rate=args.learning_rate)
+        model = CIFAR10Model(num_classes=num_classes, learning_rate=args.learning_rate)
     elif args.model == 'enn':
-        model = CIFAR10EnnModel(num_classes=args.num_classes, learning_rate=args.learning_rate, uncertainty_calibration=args.unc_calib)
+        model = CIFAR10EnnModel(num_classes=num_classes, learning_rate=args.learning_rate, uncertainty_calibration=args.unc_calib)
     elif args.model == 'beta':
-        model = CIFAR10BettaModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
+        model = CIFAR10BettaModel(num_classes=num_classes, learning_rate=args.learning_rate)
     elif args.model == 'hyper':
-        model = CIFAR10HyperModel(num_classes=args.num_classes, learning_rate=args.learning_rate, beta=args.beta)
+        model = CIFAR10HyperModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
     elif args.model == 'ds':
-        model = CIFAR10DSModel(num_classes=args.num_classes, learning_rate=args.learning_rate)
+        model = CIFAR10DSModel(num_classes=num_classes, learning_rate=args.learning_rate)
     elif args.model == 'svp':
-        model = CIFAR10SVPModel(num_classes=args.num_classes, learning_rate=args.learning_rate, beta=args.beta)
+        model = CIFAR10SVPModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
     else:
         raise ValueError(f"Model {args.model} not supported")
 
