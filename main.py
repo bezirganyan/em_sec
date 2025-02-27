@@ -28,6 +28,7 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--model', type=str, default='cnn')
     parser.add_argument('--beta', type=float, default=1)
+    parser.add_argument('--gamma', type=float, default=0.5)
     parser.add_argument('--enable-wandb', action='store_true', default=False)
     parser.add_argument('--unc-calib', action='store_true', default=False)
 
@@ -60,7 +61,7 @@ def main():
     elif args.model == 'hyper':
         model = CIFAR10HyperModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
     elif args.model == 'ds':
-        model = CIFAR10DSModel(num_classes=num_classes, learning_rate=args.learning_rate)
+        model = CIFAR10DSModel(num_classes=num_classes, learning_rate=args.learning_rate, nu=args.gamma)
     elif args.model == 'svp':
         model = CIFAR10SVPModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
     else:

@@ -16,10 +16,10 @@ from metrics import AverageUtility, SetSize, TimeLogger
 
 # ---------------- DM_test Implementation ----------------
 class DM_test(nn.Module):
-    def __init__(self, num_class, num_set, nu):
+    def __init__(self, num_class, num_set, gamma):
         super(DM_test, self).__init__()
         self.num_class = num_class
-        self.nu = nu
+        self.gamma = gamma
         # Initialize utility_matrix with random normal (non-trainable)
         utility_matrix = torch.randn(num_set, num_class)
         self.register_buffer("utility_matrix", utility_matrix)
@@ -36,7 +36,7 @@ class DM_test(nn.Module):
             min_val = row.min()
             omega_1 = inputs[:, -1:].clone() * max_val
             omega_2 = inputs[:, -1:].clone() * min_val
-            omega = self.nu * omega_1 + (1 - self.nu) * omega_2
+            omega = self.gamma * omega_1 + (1 - self.gamma) * omega_2
             utility_i = precise + omega  # (batch, 1)
             utility_outputs.append(utility_i)
         # Concatenate along last dimension: (batch, num_set)

@@ -17,6 +17,7 @@ class CIFAR10SVPModel(pl.LightningModule):
     def __init__(self, num_classes=10, learning_rate=1e-3, beta=1):
         super(CIFAR10SVPModel, self).__init__()
         self.save_hyperparameters()
+        self.learning_rate = learning_rate
         self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
         self.num_classes = num_classes
         self.beta_param = beta
@@ -103,7 +104,7 @@ class CIFAR10SVPModel(pl.LightningModule):
             wandb.log({f'test_{k}': v.compute()}, step=self.current_epoch)
 
     def configure_optimizers(self):
-        return Adam(self.parameters(), lr=self.hparams.learning_rate)
+        return Adam(self.parameters(), lr=self.learning_rate)
 
     def set_metrics(self):
         self.train_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
