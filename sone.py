@@ -35,7 +35,7 @@ srun -N1 -n1 python main.py --model {args.model} --epochs {args.epochs} --enable
 """
 
     # Write the SBATCH script to a file.
-    script_filename = f"sbatch_{job_name}.sh"
+    script_filename = f"run_scripts/sbatch_{job_name}.sh"
     with open(script_filename, "w") as f:
         f.write(sbatch_script)
     print(f"Created SBATCH script: {script_filename}")
