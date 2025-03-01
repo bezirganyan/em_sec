@@ -9,7 +9,7 @@ import wandb
 from torch.optim import Adam
 from torcheval.metrics import MulticlassAccuracy
 
-from losses import ava_edl_criterion, get_evidential_loss
+from losses import ava_edl_criterion, get_evidential_hyperloss, get_evidential_loss
 from metrics import AverageUtility, CorrectIncorrectUncertaintyPlotter, HyperAccuracy, HyperSetSize, \
     HyperUncertaintyPlotter, TimeLogger
 from models.conv_models import BasicBlock, ResNet
@@ -67,8 +67,11 @@ class CIFAR10HyperModel(pl.LightningModule):
         loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y, self.beta_param)
         loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10,
                                        self.device, targets_one_hot=True)
-        loss = loss_multilabel + loss_edl  # + gamma * (hyper_loss_edl + eqv_loss + utility)
         multilabel_probs = evidence_a / (evidence_a + evidence_b)
+        loss_hyper = get_evidential_hyperloss(evidence_hyper, multilabel_probs, y, self.current_epoch, self.num_classes,
+                                              10, self.device, beta=self.beta_param)
+        gamma = torch.relu(torch.tensor(self.current_epoch - 100)) / 50
+        loss = loss_multilabel + loss_edl  + gamma * loss_hyper
         return loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, multilabel_probs
 
     def training_step(self, batch, batch_idx):
