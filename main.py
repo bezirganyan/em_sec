@@ -31,17 +31,29 @@ def parse_args():
     parser.add_argument('--gamma', type=float, default=0.5)
     parser.add_argument('--enable-wandb', action='store_true', default=False)
     parser.add_argument('--unc-calib', action='store_true', default=False)
+    parser.add_argument('--ckpt-path', type=str, default=None)
+    parser.add_argument('--test', action='store_true', default=False)
 
     return parser.parse_args()
+
+def wandb_name_from_args(args):
+    if args.model == 'cnn':
+        return f"{args.model}_{args.dataset}_{args.epochs}_epochs"
+    elif args.model == 'enn':
+        return f"{args.model}_{args.dataset}_{args.epochs}_epochs_{args.unc_calib}_uncalib"
+    elif (args.model == 'hyper') or (args.model == 'svp'):
+        return f"{args.model}_{args.dataset}_{args.beta}_beta_{args.epochs}_epochs"
+    elif args.model == 'ds':
+        return f"{args.model}_{args.dataset}_{args.gamma}_gamma_{args.epochs}_epochs"
+    else:
+        return f"{args.model}_{args.dataset}_{args.epochs}_epochs"
 
 def main():
     args = parse_args()
 
     wandb_mode = 'online' if args.enable_wandb else 'disabled'
-    wandb_name = f"{args.model}_{args.dataset}_{args.beta}_beta_{args.epochs}_epochs_{args.learning_rate}_lr"
-    wandb.init(project='VagueFusion', name=wandb_name, config=vars(args), mode=wandb_mode)
+    wandb_name = wandb_name_from_args(args)
 
-    num_classes = None
     if args.dataset == 'cifar10':
         data = CIFAR10DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
         num_classes = 10
@@ -75,14 +87,24 @@ def main():
         num_sanity_val_steps=0,
         callbacks=[OnKeyboardInterruptCallback()]
     )
+    # get pl logging directory
+    log_path = trainer.logger.log_dir
+    print(f"Logging to {log_path}")
+    # wandb log as config parameter
+    args.log_path = log_path
+    wandb.init(project='VagueFusion', name=wandb_name, config=vars(args), mode=wandb_mode)
+
     train_dataloader = data.train_dataloader()
     val_dataloader = data.val_dataloader()
     test_dataloader = data.test_dataloader()
     print("\nStarting full training...\n")
-    try:
-        trainer.fit(model, train_dataloader, val_dataloader)
-    except KeyboardInterrupt:
-        print("\nTraining interrupted. Testing the model")
+    if args.ckpt_path:
+        model = model.load_from_checkpoint(args.ckpt_path)
+    if not args.test:
+        try:
+            trainer.fit(model, train_dataloader, val_dataloader)
+        except KeyboardInterrupt:
+            print("\nTraining interrupted. Testing the model")
     results = trainer.test(model, test_dataloader)[0]
     print(f'Test results: {results}')
 
