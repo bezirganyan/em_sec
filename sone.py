@@ -31,7 +31,7 @@ def main():
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate em_sec
 
-srun -N1 -n1 python ../main.py --model {args.model} --epochs {args.epochs} --enable-wandb --dataset {args.dataset} {extra_params}
+srun -N1 -n1 python main.py --model {args.model} --epochs {args.epochs} --enable-wandb --dataset {args.dataset} {extra_params}
 """
 
     # Write the SBATCH script to a file.
