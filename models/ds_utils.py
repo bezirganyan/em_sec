@@ -126,50 +126,95 @@ import torch
 from torch import nn
 
 
-class DM_test(nn.Module):
-    """
-    DM_test layer in PyTorch. Uses a non-trainable utility matrix to compute expected utilities.
-    """
+def compute_utility_matrix(act_set, class_set, weight_dict, tol_i):
+    num_set = len(act_set)
+    num_class = len(class_set)
+    utility_matrix = np.zeros((num_set, num_class))
+    for i, act in enumerate(act_set):
+        # Find the intersection of act and class_set
+        intersec = [c for c in act if c in class_set]
+        if len(intersec) == 1:
+            utility_matrix[i, intersec[0]] = 1
+        else:
+            # For composite sets, use the weight computed for that size.
+            # weight_dict[j] is an array of shape (5, j), and tol_i selects the tolerance level (e.g. tol=0.8)
+            w = weight_dict[len(intersec)]
+            utility_value = w[tol_i, 0]
+            for c in intersec:
+                utility_matrix[i, c] = utility_value
+    return utility_matrix
 
-    def __init__(self, num_class, num_set, nu):
+# class DM_test(nn.Module):
+#     """
+#     DM_test layer in PyTorch. Uses a non-trainable utility matrix to compute expected utilities.
+#     """
+#
+#     def __init__(self, num_class, num_set, nu):
+#         super(DM_test, self).__init__()
+#         self.num_class = num_class
+#         self.nu = nu
+#
+#         utility_matrix = torch.randn(num_set, num_class)
+#         self.register_buffer("utility_matrix", utility_matrix)
+#
+#     def forward(self, inputs):
+#         """
+#         Args:
+#             inputs (Tensor): shape (batch_size, num_class+1),
+#                              where inputs[:, 0:self.num_class] is the distribution across classes,
+#                              and inputs[:, -1] is the mass for omega.
+#
+#         Returns:
+#             Tensor: shape (batch_size, num_set). The expected utilities for each set i.
+#         """
+#
+#         utility = None
+#         for i in range(self.utility_matrix.size(0)):
+#
+#             precise = inputs[:, 0:self.num_class] * self.utility_matrix[i]
+#             precise = precise.sum(dim=-1, keepdim=True)
+#
+#             omega_1 = inputs[:, -1] * self.utility_matrix[i].max()
+#             omega_2 = inputs[:, -1] * self.utility_matrix[i].min()
+#             omega = (self.nu * omega_1 + (1.0 - self.nu) * omega_2).unsqueeze(-1).float()
+#
+#             utility_i = precise + omega
+#
+#             if utility is None:
+#                 utility = utility_i
+#             else:
+#                 utility = torch.cat([utility, utility_i], dim=-1)
+#
+#         return utility
+
+
+class DM_test(nn.Module):
+    def __init__(self, num_class, act_set, weight_dict, tol_i, nu):
         super(DM_test, self).__init__()
         self.num_class = num_class
         self.nu = nu
-
-        utility_matrix = torch.randn(num_set, num_class)
-        self.register_buffer("utility_matrix", utility_matrix)
+        # Define the class set (typically 0,1,...,num_class-1)
+        class_set = list(range(num_class))
+        # Compute the utility matrix deterministically
+        utility_matrix = compute_utility_matrix(act_set, class_set, weight_dict, tol_i)
+        # Register as a non-trainable buffer; shape: (num_set, num_class)
+        self.register_buffer("utility_matrix", torch.tensor(utility_matrix, dtype=torch.float32))
 
     def forward(self, inputs):
-        """
-        Args:
-            inputs (Tensor): shape (batch_size, num_class+1),
-                             where inputs[:, 0:self.num_class] is the distribution across classes,
-                             and inputs[:, -1] is the mass for omega.
-
-        Returns:
-            Tensor: shape (batch_size, num_set). The expected utilities for each set i.
-        """
-
-        utility = None
-        for i in range(self.utility_matrix.size(0)):
-
-            precise = inputs[:, 0:self.num_class] * self.utility_matrix[i]
-            precise = precise.sum(dim=-1, keepdim=True)
-
-            omega_1 = inputs[:, -1] * self.utility_matrix[i].max()
-            omega_2 = inputs[:, -1] * self.utility_matrix[i].min()
-            omega = (self.nu * omega_1 + (1.0 - self.nu) * omega_2).unsqueeze(-1).float()
-
-            utility_i = precise + omega
-
-            if utility is None:
-                utility = utility_i
-            else:
-                utility = torch.cat([utility, utility_i], dim=-1)
-
+        # inputs: shape (batch, num_class+1), where the last column is the uncertainty mass
+        outputs = []
+        for i in range(self.utility_matrix.shape[0]):
+            row = self.utility_matrix[i]  # shape: (num_class,)
+            precise = (inputs[:, :self.num_class] * row).sum(dim=-1, keepdim=True)
+            max_val = row.max()
+            min_val = row.min()
+            omega_1 = inputs[:, -1:] * max_val
+            omega_2 = inputs[:, -1:] * min_val
+            omega = self.nu * omega_1 + (1 - self.nu) * omega_2
+            utility_i = precise + omega  # shape: (batch, 1)
+            outputs.append(utility_i)
+        utility = torch.cat(outputs, dim=-1)  # shape: (batch, num_set)
         return utility
-
-
 class DM_pignistic(nn.Module):
     """
     DM_pignistic layer in PyTorch. Converts a mass distribution (with omega) into

@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument('--model', type=str, default='cnn')
     parser.add_argument('--beta', type=float, default=1)
     parser.add_argument('--gamma', type=float, default=0.5)
+    parser.add_argument('--toli', type=int, default=2)
     parser.add_argument('--enable-wandb', action='store_true', default=False)
     parser.add_argument('--unc-calib', action='store_true', default=False)
     parser.add_argument('--ckpt-path', type=str, default=None)
@@ -79,7 +80,7 @@ def main():
             CIFAR10HyperModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
     elif args.model == 'ds':
         model = CIFAR10DSModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
-            CIFAR10DSModel(num_classes=num_classes, learning_rate=args.learning_rate, nu=args.gamma)
+            CIFAR10DSModel(num_classes=num_classes, learning_rate=args.learning_rate, nu=args.gamma, tol_i=args.toli)
     elif args.model == 'svp':
         model = CIFAR10SVPModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
             CIFAR10SVPModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)

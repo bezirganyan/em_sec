@@ -1,4 +1,5 @@
 import math
+import os
 import time
 
 import torch
@@ -10,38 +11,9 @@ from torch.optim import Adam
 from torchmetrics import Accuracy
 
 from models.conv_models import BasicBlock, ResNet
-from models.ds_utils import DSNet  # DSNet: your DS-based network implementation
-from metrics import AverageUtility, SetSize, TimeLogger
+from models.ds_utils import DM_test, DSNet  # DSNet: your DS-based network implementation
+from metrics import AverageUtility, SetSize, TimeLogger, compute_weights
 
-
-# ---------------- DM_test Implementation ----------------
-class DM_test(nn.Module):
-    def __init__(self, num_class, num_set, gamma):
-        super(DM_test, self).__init__()
-        self.num_class = num_class
-        self.gamma = gamma
-        # Initialize utility_matrix with random normal (non-trainable)
-        utility_matrix = torch.randn(num_set, num_class)
-        self.register_buffer("utility_matrix", utility_matrix)
-
-    def forward(self, inputs):
-        # inputs: (batch, num_class+1) with uncertainty in last column
-        utility_outputs = []
-        for i in range(self.utility_matrix.shape[0]):
-            row = self.utility_matrix[i]  # shape: (num_class,)
-            # Compute the "precise" term: dot product between evidences (first num_class entries) and row.
-            precise = (inputs[:, :self.num_class] * row).sum(dim=-1, keepdim=True)
-            # Compute omega components using the uncertainty mass (last column)
-            max_val = row.max()
-            min_val = row.min()
-            omega_1 = inputs[:, -1:].clone() * max_val
-            omega_2 = inputs[:, -1:].clone() * min_val
-            omega = self.gamma * omega_1 + (1 - self.gamma) * omega_2
-            utility_i = precise + omega  # (batch, 1)
-            utility_outputs.append(utility_i)
-        # Concatenate along last dimension: (batch, num_set)
-        utility = torch.cat(utility_outputs, dim=-1)
-        return utility
 
 # ---------------- Helper: Power Set ----------------
 def power_set(items):
@@ -57,7 +29,7 @@ def power_set(items):
 
 # ---------------- CIFAR10DSModel Lightning Module ----------------
 class CIFAR10DSModel(pl.LightningModule):
-    def __init__(self, num_classes=10, learning_rate=1e-3, prototypes=200, nu=0.9):
+    def __init__(self, num_classes=10, learning_rate=1e-3, prototypes=200, nu=0.9, tol_i=2):
         super(CIFAR10DSModel, self).__init__()
         self.save_hyperparameters()
         self.num_classes = num_classes
@@ -73,9 +45,15 @@ class CIFAR10DSModel(pl.LightningModule):
 
         # Compute the nonempty power set for set-valued predictions.
         self.act_set = power_set(list(range(num_classes)))
-        num_set = len(self.act_set)
+        cache_file = f'cache/weights_{num_classes}.pt'
+        if os.path.exists(cache_file):
+            weight_matrix = torch.load(cache_file, weights_only=False)
+        else:
+            print(f"Computing weights for {num_classes} classes for OWA utility metric.")
+            weight_matrix = compute_weights(num_classes)
+            torch.save(weight_matrix, cache_file)
         # DM_test: computes utility scores for each possible set.
-        self.DM_test = DM_test(num_classes, num_set, nu)
+        self.DM_test = DM_test(num_classes, self.act_set, weight_matrix, tol_i, nu)
 
         self.set_params = {"c": num_classes, "svptype": "ds", "nu": nu}
         self.set_metrics()
