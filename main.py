@@ -48,6 +48,7 @@ def wandb_name_from_args(args):
     else:
         return f"{args.model}_{args.dataset}_{args.epochs}_epochs"
 
+
 def main():
     args = parse_args()
 
@@ -65,17 +66,23 @@ def main():
     data.setup()
 
     if args.model == 'cnn':
-        model = CIFAR10Model(num_classes=num_classes, learning_rate=args.learning_rate)
+        model = CIFAR10Model.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
+            CIFAR10Model(num_classes=num_classes, learning_rate=args.learning_rate)
     elif args.model == 'enn':
-        model = CIFAR10EnnModel(num_classes=num_classes, learning_rate=args.learning_rate, uncertainty_calibration=args.unc_calib)
+        model = CIFAR10EnnModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
+            CIFAR10EnnModel(num_classes=num_classes, learning_rate=args.learning_rate, uncertainty_calibration=args.unc_calib)
     elif args.model == 'beta':
-        model = CIFAR10BettaModel(num_classes=num_classes, learning_rate=args.learning_rate)
+        model = CIFAR10BettaModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
+            CIFAR10BettaModel(num_classes=num_classes, learning_rate=args.learning_rate)
     elif args.model == 'hyper':
-        model = CIFAR10HyperModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
+        model = CIFAR10HyperModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
+            CIFAR10HyperModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
     elif args.model == 'ds':
-        model = CIFAR10DSModel(num_classes=num_classes, learning_rate=args.learning_rate, nu=args.gamma)
+        model = CIFAR10DSModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
+            CIFAR10DSModel(num_classes=num_classes, learning_rate=args.learning_rate, nu=args.gamma)
     elif args.model == 'svp':
-        model = CIFAR10SVPModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
+        model = CIFAR10SVPModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
+            CIFAR10SVPModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
     else:
         raise ValueError(f"Model {args.model} not supported")
 
@@ -98,8 +105,7 @@ def main():
     val_dataloader = data.val_dataloader()
     test_dataloader = data.test_dataloader()
     print("\nStarting full training...\n")
-    if args.ckpt_path:
-        model = model.load_from_checkpoint(args.ckpt_path)
+
     if not args.test:
         try:
             trainer.fit(model, train_dataloader, val_dataloader)
