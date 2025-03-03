@@ -241,6 +241,15 @@ def get_evidential_hyperloss(evidence, multilabel_probs, target, epoch_num, num_
     return loss_acc
 
 
+def get_fbeta_loss(evidence, multilabel_probs, beta=1):
+    hyperset_soft_size = torch.sigmoid(1000 * (multilabel_probs - 0.5)).sum(dim=1)
+    soft_sizes = torch.ones(hyperset_soft_size.shape).to(evidence.device)
+    hyper_choices = (evidence.argmax(dim=1) == evidence.shape[1] - 1)
+    soft_sizes[hyper_choices] *= hyperset_soft_size[hyper_choices]
+
+    gfb = (1+beta**2) / (soft_sizes + beta**2)
+    return -torch.log(gfb).mean()
+
 def get_equivalence_loss(multinomial_evidence, hyper_evidence):
     beliefs_m = multinomial_evidence / (multinomial_evidence + 1).sum(dim=1, keepdim=True)
     beliefs_h = hyper_evidence[:, :-1] / (hyper_evidence[:, :-1] + 1).sum(dim=1, keepdim=True)
