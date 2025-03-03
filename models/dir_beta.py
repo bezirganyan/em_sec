@@ -70,9 +70,9 @@ class CIFAR10HyperModel(pl.LightningModule):
         multilabel_probs = evidence_a / (evidence_a + evidence_b)
         # loss_hyper = get_evidential_hyperloss(evidence_hyper, multilabel_probs, y, self.current_epoch, self.num_classes,
         #                                       10, self.device, beta=self.beta_param)
-        loss_hyper = get_fbeta_loss(evidence_hyper, multilabel_probs, self.beta_param)
-        gamma = torch.relu(torch.tensor(self.current_epoch - 50)) / 50
-        loss = loss_multilabel + loss_edl  + gamma * loss_hyper
+        # loss_hyper = get_fbeta_loss(evidence_hyper, multilabel_probs, self.beta_param)
+        # gamma = torch.relu(torch.tensor(self.current_epoch - 50)) / 50
+        loss = loss_multilabel + loss_edl  #+ gamma * loss_hyper
         return loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, multilabel_probs
 
     def training_step(self, batch, batch_idx):
