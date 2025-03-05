@@ -58,6 +58,7 @@ class HyperAccuracy(Metric):
 class HyperSetSize(Metric):
     def __init__(self, num_classes=10, **kwargs):
         super(HyperSetSize, self).__init__(**kwargs)
+        self.num_classes = num_classes
         self.add_state('counts', default=torch.tensor([]), dist_reduce_fx='cat')
         self.add_state('multinomial_number', default=torch.tensor([0]), dist_reduce_fx='sum')
         self.add_state('hyper_counts', default=torch.tensor([]), dist_reduce_fx='cat')
@@ -102,7 +103,7 @@ class HyperSetSize(Metric):
         return self.counts.mean()
 
     def plot(self):
-        sns.barplot(x=range(0, 10), y=[self.counts.eq(i).sum().item() for i in range(0, 10)])
+        sns.barplot(x=range(0, self.num_classes), y=[self.counts.eq(i).sum().item() for i in range(0, self.num_classes)])
         plt.title('Number of classes in suggeted set')
         plt.show()
 
@@ -115,7 +116,7 @@ class HyperSetSize(Metric):
         plt.title('Corrects and incorrects per set size')
         plt.show()
 
-        sns.barplot(x=range(0, 10), y=[self.hyper_counts.eq(i).sum().item() for i in range(0, 10)])
+        sns.barplot(x=range(0, self.num_classes), y=[self.hyper_counts.eq(i).sum().item() for i in range(0, self.num_classes)])
         plt.title('Number of classes in Hyperset')
         plt.show()
         sns.barplot(x=['Multinomial', 'Hyper'], y=[self.multinomial_number.item(), self.hyper_counts.shape[0]])
@@ -341,17 +342,23 @@ class CorrectIncorrectUncertaintyPlotter(Metric):
         super(CorrectIncorrectUncertaintyPlotter, self).__init__(**kwargs)
         self.add_state('corrects', default=torch.tensor([]), dist_reduce_fx='cat')
         self.add_state('uncertainties', default=torch.tensor([]), dist_reduce_fx='cat')
+        self.add_state('entropy', default=torch.tensor([]), dist_reduce_fx='cat')
 
     def update(self, inputs, labels):
         corrects = (inputs.argmax(dim=1) == labels).float()
         uncertainties = inputs.shape[1] / (inputs + 1).sum(dim=1)
+        probs = (inputs + 1) / (inputs + 1).sum(dim=1).unsqueeze(1)
+        entropy = -torch.sum(probs * torch.log(probs), dim=1)
         self.corrects = torch.cat((self.corrects, corrects))
         self.uncertainties = torch.cat((self.uncertainties, uncertainties))
+        self.entropy = torch.cat((self.entropy, entropy))
+
 
     def merge_state(self, metrics):
         for metric in metrics:
             self.corrects = torch.cat((self.corrects, metric.corrects))
             self.uncertainties = torch.cat((self.uncertainties, metric.uncertainties))
+            self.entropy = torch.cat((self.entropy, metric.entropy))
 
     def compute(self):
         return self.corrects, self.uncertainties
@@ -369,6 +376,13 @@ class CorrectIncorrectUncertaintyPlotter(Metric):
         plt.ylabel('Density')
         plt.title('Correct vs Incorrect Uncertainty')
         plt.legend()
+        plt.show()
+
+        # plot scatterplot of uncertainty vs entropy with corrects and incorrects as hue
+        sns.scatterplot(x=self.uncertainties.cpu().numpy(), y=self.entropy.cpu().numpy(), hue=self.corrects.cpu().numpy())
+        plt.xlabel('Uncertainty')
+        plt.ylabel('Entropy')
+        plt.title('Uncertainty vs Entropy')
         plt.show()
 
 
@@ -437,6 +451,42 @@ class BetaEvidenceAccumulator(Metric):
         beta = torch.cat(self.beta).to('cpu')
         labels = torch.cat(self.labels).to('cpu')
         torch.save((alpha, beta, labels), path)
+
+
+class HyperEvidenceAccumulator(Metric):
+    def __init__(self, **kwargs):
+        super(HyperEvidenceAccumulator, self).__init__(**kwargs)
+        self.add_state('evidences', default=[], dist_reduce_fx='cat')
+        self.add_state('alpha', default=[], dist_reduce_fx='cat')
+        self.add_state('beta', default=[], dist_reduce_fx='cat')
+        self.add_state('labels', default=[], dist_reduce_fx='cat')
+
+    def update(self, evidences, alpha, beta, labels):
+        self.evidences.append(evidences)
+        self.alpha.append(alpha)
+        self.beta.append(beta)
+        self.labels.append(labels)
+
+    def merge_state(self, metrics):
+        for metric in metrics:
+            self.evidences.extend(metric.evidences)
+            self.alpha.extend(metric.alpha)
+            self.beta.extend(metric.beta)
+            self.labels.extend(metric.labels)
+
+    def compute(self):
+        evidences = torch.cat(self.evidences).to('cpu')
+        alpha = torch.cat(self.alpha).to('cpu')
+        beta = torch.cat(self.beta).to('cpu')
+        labels = torch.cat(self.labels).to('cpu')
+        return evidences, alpha, beta, labels
+
+    def save(self, path):
+        evidences = torch.cat(self.evidences).to('cpu')
+        alpha = torch.cat(self.alpha).to('cpu')
+        beta = torch.cat(self.beta).to('cpu')
+        labels = torch.cat(self.labels).to('cpu')
+        torch.save((evidences, alpha, beta, labels), path)
 
 
 def eval_calibration(predictions, confidences, labels, device, M=15):
