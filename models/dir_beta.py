@@ -17,7 +17,7 @@ from models.conv_models import BasicBlock, ResNet
 
 
 class CIFAR10HyperModel(pl.LightningModule):
-    def __init__(self, num_classes=10, learning_rate=1e-3, beta=1):
+    def __init__(self, num_classes=10, learning_rate=1e-3, beta=1, annealing_start=0, annealing_end=100):
         super(CIFAR10HyperModel, self).__init__()
         self.save_hyperparameters()
         self.learning_rate = learning_rate
@@ -27,6 +27,8 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.alpha = nn.Linear(self.model.linear.in_features, num_classes)
         self.beta = nn.Linear(self.model.linear.in_features, num_classes)
         self.multinomial_evidence_collector = nn.Linear(self.model.linear.in_features, num_classes)
+        self.annealing_start = annealing_start
+        self.annealing_end = annealing_end
         # self.hyper_evidence_collector = nn.Linear(num_classes * 2, num_classes + 1)
         self.model.linear = nn.Identity()
         self.set_metrics()
@@ -65,7 +67,8 @@ class CIFAR10HyperModel(pl.LightningModule):
         x, y = batch
         y = F.one_hot(y, self.num_classes)
         evidence_a, evidence_b, multinomial_evidence, evidence_hyper = self(x)
-        loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y, self.beta_param, self.current_epoch, 300, 400)
+        loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y, self.beta_param, self.current_epoch,
+                                            self.annealing_start, self.annealing_end)
         loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10,
                                        self.device, targets_one_hot=True)
         multilabel_probs = evidence_a / (evidence_a + evidence_b)

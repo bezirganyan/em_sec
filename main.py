@@ -28,6 +28,8 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--model', type=str, default='cnn')
     parser.add_argument('--beta', type=float, default=1)
+    parser.add_argument('--ann_start', type=int, default=100)
+    parser.add_argument('--ann_end', type=int, default=300)
     parser.add_argument('--gamma', type=float, default=0.5)
     parser.add_argument('--toli', type=int, default=2)
     parser.add_argument('--enable-wandb', action='store_true', default=False)
@@ -76,8 +78,9 @@ def main():
         model = CIFAR10BettaModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
             CIFAR10BettaModel(num_classes=num_classes, learning_rate=args.learning_rate)
     elif args.model == 'hyper':
-        model = CIFAR10HyperModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
-            CIFAR10HyperModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
+        model = CIFAR10HyperModel.load_from_checkpoint(args.ckpt_path, strict=False) if args.ckpt_path else \
+            CIFAR10HyperModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta,
+                              annealing_start=args.ann_start, annealing_end=args.ann_end)
     elif args.model == 'ds':
         model = CIFAR10DSModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
             CIFAR10DSModel(num_classes=num_classes, learning_rate=args.learning_rate, nu=args.gamma, tol_i=args.toli)
