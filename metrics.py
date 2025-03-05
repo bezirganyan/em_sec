@@ -35,16 +35,11 @@ class HyperAccuracy(Metric):
         self.add_state('corrects', default=torch.tensor([0]), dist_reduce_fx='sum')
         self.add_state('total', default=torch.tensor([0]), dist_reduce_fx='sum')
 
-    def update(self, input, target, hyperset):
-        corrects = (input[:, :-1].argmax(dim=1) == target.argmax(dim=1)) & (input[:, :-1].sum(dim=1) > 0)
-
-        set_corrects = ((hyperset & target).sum(dim=1) > 0) & (input[:, -1] > 0)
-
-        corrects = corrects | set_corrects
-        num_corrects = corrects.sum()
+    def update(self, input, target):
+        num_corrects = torch.tensor([target[i].argmax() in input[i] for i in range(len(input))]).to(target.device).sum()
         self.corrects += num_corrects
-        self.total += input.size(0)
-        return num_corrects / input.size(0)
+        self.total += len(input)
+        return num_corrects / len(input)
 
     def merge_state(self, metrics):
         for metric in metrics:

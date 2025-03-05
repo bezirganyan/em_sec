@@ -12,7 +12,7 @@ from torchmetrics import Accuracy
 
 from models.conv_models import BasicBlock, ResNet
 from models.ds_utils import DM_test, DSNet  # DSNet: your DS-based network implementation
-from metrics import AverageUtility, SetSize, TimeLogger, compute_weights
+from metrics import AverageUtility, HyperAccuracy, SetSize, TimeLogger, compute_weights
 
 
 # ---------------- Helper: Power Set ----------------
@@ -85,7 +85,7 @@ class CIFAR10DSModel(pl.LightningModule):
         loss = F.nll_loss(log_probs, y)
         self.log('train_loss', loss)
         preds = outputs[:, :self.num_classes].argmax(dim=1)
-        self.train_acc(preds, y)
+        self.train_multiclass_acc(preds, y)
         _ = self.predict_set(x, self.set_params)  # For consistency with baseline.
         return loss
 
@@ -95,12 +95,13 @@ class CIFAR10DSModel(pl.LightningModule):
         loss = F.cross_entropy(outputs[:, :self.num_classes], y)
         self.log('val_loss', loss, prog_bar=True)
         preds = outputs[:, :self.num_classes].argmax(dim=1)
-        self.val_acc(preds, y)
+        self.val_multiclass_acc(preds, y)
         # Set-valued predictions via DM_test.
         set_preds = self.predict_set(x, self.set_params)
         # Convert predictions to tensors for metric updates.
         set_preds_tensor = [torch.tensor(p).to(y.device) for p in set_preds]
         y_one_hot = F.one_hot(y, self.num_classes)
+        self.val_acc.update(set_preds_tensor, y_one_hot)
         self.val_set_size.update(set_preds_tensor, y_one_hot)
         for k, metric in self.val_utility_dict.items():
             if metric.device != y_one_hot.device:
@@ -113,7 +114,7 @@ class CIFAR10DSModel(pl.LightningModule):
         loss = F.cross_entropy(outputs[:, :self.num_classes], y)
         self.log('test_loss', loss)
         preds = outputs[:, :self.num_classes].argmax(dim=1)
-        self.test_acc(preds, y)
+        self.test_multiclass_acc(preds, y)
         time_start = time.time()
         set_preds = self.predict_set(x, self.set_params)
         duration = time.time() - time_start
@@ -121,17 +122,19 @@ class CIFAR10DSModel(pl.LightningModule):
         set_preds_tensor = [torch.tensor(p).to(y.device) for p in set_preds]
         y_one_hot = F.one_hot(y, self.num_classes)
         self.test_set_size.update(set_preds_tensor, y_one_hot)
+        self.test_acc.update(set_preds_tensor, y_one_hot)
         for k, metric in self.test_utility_dict.items():
             if metric.device != y_one_hot.device:
                 metric.to(y_one_hot.device)
             metric.update(set_preds_tensor, y_one_hot)
 
     def on_train_epoch_end(self) -> None:
-        self.log('train_acc', self.train_acc.compute())
+        self.log('train_multiclass_acc', self.train_multiclass_acc.compute())
 
     def on_validation_epoch_end(self) -> None:
         val_acc = self.val_acc.compute()
         val_set_size = self.val_set_size.compute()
+        self.log('val_multiclass_acc', val_acc, prog_bar=True)
         self.log('val_acc', val_acc, prog_bar=True)
         self.log('val_set_size', val_set_size, prog_bar=True)
         wandb.log({"val_set_size": val_set_size}, step=self.current_epoch)
@@ -144,6 +147,7 @@ class CIFAR10DSModel(pl.LightningModule):
     def on_test_epoch_end(self) -> None:
         test_acc = self.test_acc.compute()
         test_set_size = self.test_set_size.compute()
+        self.log('test_multiclass_acc', test_acc)
         self.log('test_acc', test_acc)
         self.log('test_set_size', test_set_size)
         self.log('test_time', self.test_time_logger.compute())
@@ -159,9 +163,13 @@ class CIFAR10DSModel(pl.LightningModule):
         return Adam(self.parameters(), lr=self.learning_rate)
 
     def set_metrics(self):
-        self.train_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
-        self.val_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
-        self.test_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
+        self.train_multiclass_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
+        self.val_multiclass_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
+        self.test_multiclass_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
+
+        self.train_acc = HyperAccuracy()
+        self.val_acc = HyperAccuracy()
+        self.test_acc = HyperAccuracy()
 
         self.val_utility_dict = {
             'fb_1': AverageUtility(self.num_classes, utility='fb', beta=1),

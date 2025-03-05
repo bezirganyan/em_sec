@@ -85,7 +85,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.log('train_loss', loss, prog_bar=True)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
-        self.train_acc.update(y_hat, y, hyperset > 0.5)
+        self.train_multiclass_acc.update(multinomial_evidence.argmax(dim=1), y.argmax(dim=1))
         self.train_set_size.update(y_hat, hyperset > 0.5, y)
 
         return loss
@@ -96,20 +96,11 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.log('val_loss', loss, prog_bar=True)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
-        self.val_acc.update(y_hat, y, hyperset > 0.5)
         self.val_set_size.update(y_hat, hyperset > 0.5, y)
         self.val_multiclass_acc.update(multinomial_evidence.argmax(dim=1), y.argmax(dim=1))
         y_hat_idx_idx = evidence_hyper.argmax(dim=1)
-        pred_sets = []
-        for i in range(y_hat.shape[0]):
-            if y_hat_idx_idx[i] < self.num_classes:
-                pred_set = [y_hat_idx_idx[i].item()]
-            else:
-                # Assuming hyperset[i] is a tensor of shape (num_classes,) where positive values indicate membership.
-                pred_set = torch.nonzero(hyperset[i] > 0.5, as_tuple=False).squeeze(-1).tolist()
-                # order the pred set by hyperset values in descending order
-                pred_set = sorted(pred_set, key=lambda x: hyperset[i][x], reverse=True)
-            pred_sets.append(pred_set)
+        pred_sets = self.predict_set(batch[0], as_list=True)
+        self.val_acc.update(pred_sets, y)
         for utility in self.val_utility_dict.values():
             if utility.device != self.device:
                 utility.to(self.device)
@@ -121,7 +112,6 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.log('test_loss', loss)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
-        self.test_acc.update(y_hat, y, hyperset > 0.5)
         self.test_set_size.update(y_hat, hyperset > 0.5, y)
         self.test_multiclass_acc.update(multinomial_evidence.argmax(dim=1), y.argmax(dim=1))
         self.evidence_accumulator.update(multinomial_evidence, evidence_a, evidence_b, y)
@@ -137,6 +127,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.test_time_logger.update(duration)
         self.cor_unc_plot.update(multinomial_evidence, y.argmax(dim=1))
         self.hyper_uncertainty_plot.update(pred_sets, evidence_hyper, y)
+        self.test_acc.update(pred_sets, y)
         for utility in self.test_utility_dict.values():
             if utility.device != self.device:
                 utility.to(self.device)
@@ -160,7 +151,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         return y_hyper
 
     def on_train_epoch_end(self) -> None:
-        self.log('train_acc', self.train_acc.compute(), prog_bar=True)
+        self.log('train_multiclass_acc', self.train_multiclass_acc.compute(), prog_bar=True)
         self.log('train_set_size', self.train_set_size.compute())
         wandb.log({'train_set_size': self.train_set_size.compute()}, step=self.current_epoch)
         wandb.log({'train_acc': self.train_acc.compute()}, step=self.current_epoch)
