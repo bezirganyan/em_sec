@@ -10,7 +10,8 @@ from torch.optim import Adam
 from torcheval.metrics import MulticlassAccuracy
 
 from losses import ava_edl_criterion, get_evidential_hyperloss, get_evidential_loss, get_fbeta_loss
-from metrics import AverageUtility, CorrectIncorrectUncertaintyPlotter, HyperAccuracy, HyperSetSize, \
+from metrics import AverageUtility, CorrectIncorrectUncertaintyPlotter, HyperAccuracy, HyperEvidenceAccumulator, \
+    HyperSetSize, \
     HyperUncertaintyPlotter, TimeLogger
 from models.conv_models import BasicBlock, ResNet
 
@@ -64,7 +65,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         x, y = batch
         y = F.one_hot(y, self.num_classes)
         evidence_a, evidence_b, multinomial_evidence, evidence_hyper = self(x)
-        loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y, self.beta_param)
+        loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y, self.beta_param, self.current_epoch, 300, 400)
         loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10,
                                        self.device, targets_one_hot=True)
         multilabel_probs = evidence_a / (evidence_a + evidence_b)
@@ -120,6 +121,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.test_acc.update(y_hat, y, hyperset > 0.5)
         self.test_set_size.update(y_hat, hyperset > 0.5, y)
         self.test_multiclass_acc.update(multinomial_evidence.argmax(dim=1), y.argmax(dim=1))
+        self.evidence_accumulator.update(multinomial_evidence, evidence_a, evidence_b, y)
 
         time_start = time.time()
         pred_sets = self.predict_set(batch[0], as_list=True)
@@ -141,17 +143,16 @@ class CIFAR10HyperModel(pl.LightningModule):
         evidence_a, evidence_b, multinomial_evidence, evidence_hyper = self(x)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
-        hyperset = (evidence_a > evidence_b).float()
+        probs = evidence_a / (evidence_a + evidence_b)
+        hyperset = (probs > 0.9).float()
         y_hat_idx_idx = evidence_hyper.argmax(dim=1)
         mask = y_hat_idx_idx == self.num_classes
         y_hyper = multinomial_evidence.argmax(dim=1)
         y_hyper = F.one_hot(y_hyper, self.num_classes).long()
         y_hyper[mask] = (hyperset[mask] > 0.5).long()
         if as_list:
-            rows, cols = y_hyper.nonzero(as_tuple=True)
-            _, counts = torch.unique_consecutive(rows, return_counts=True)
-            groups = torch.split(cols, tuple(counts.tolist()))
-            y_hyper = list(map(lambda x: x.tolist(), groups))
+            # For each row in y_hyper, get the indices where the element is nonzero.
+            y_hyper = [row.nonzero(as_tuple=False).view(-1).tolist() for row in y_hyper]
 
         return y_hyper
 
@@ -179,6 +180,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.log('test_multiclass_acc', self.test_multiclass_acc.compute())
         self.log('test_time', self.test_time_logger.compute())
         self.log('test_time_as_list', self.test_time_logger_as_list.compute())
+        self.evidence_accumulator.save('evidence_with_beta.pt')
         wandb.log({'test_set_size': self.test_set_size.compute()}, step=self.current_epoch)
         wandb.log({'test_acc': self.test_acc.compute()}, step=self.current_epoch)
         wandb.log({'test_time': self.test_time_logger.compute()}, step=self.current_epoch)
@@ -236,3 +238,5 @@ class CIFAR10HyperModel(pl.LightningModule):
         self.hyper_uncertainty_plot = HyperUncertaintyPlotter()
         self.test_time_logger = TimeLogger()
         self.test_time_logger_as_list = TimeLogger()
+
+        self.evidence_accumulator = HyperEvidenceAccumulator()

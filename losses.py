@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from sentry_sdk.utils import epoch
 from torch import digamma
 from torch.distributions.constraints import multinomial
+from torch.onnx.symbolic_opset11 import argsort
 
 
 def kl_divergence(alpha, num_classes, device):
@@ -150,20 +151,39 @@ def get_bm_loss(alphas, alpha_a, target):
     return loss_acc
 
 
-def ava_edl_criterion(B_alpha, B_beta, targets, fbeta=1):
+def ava_edl_criterion(B_alpha, B_beta, targets, fbeta=1, current_epoch=0, annealing_start=100, annealing_end=200):
     # edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + (1 - targets) * (
     #         torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta)))
 
     probs = B_alpha / (B_alpha + B_beta)
-    size = torch.sigmoid(10 * (probs - 0.5)).sum(dim=1)
+    size = torch.sigmoid(targets.shape[1] * (probs - 0.5)).sum(dim=1)
     num_classes = B_alpha.shape[1]
-    edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + (1 / (num_classes - 1)) * (1 - targets) * (
-            torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))) + 20*torch.relu(1.5 - size).mean()
+    # edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + (1 / (num_classes - 1)) * (1 - targets) * (
+    #         torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))) + 20*torch.relu(1.5 - size).mean()
 
-    gfb = (2 + fbeta ** 2) / (size + fbeta ** 2)
+    weights = (1 / (num_classes - 1)) * torch.ones_like(targets)
+
+    probs_copy = probs.clone()
+    probs_copy = probs_copy.detach()
+    order = torch.argsort(probs_copy, dim=1) + 1
+    weights_p = (1 + fbeta ** 2) / (order + fbeta ** 2)
+    weights_p = 1 - weights_p
+
+    annealinng_coef = torch.min(
+        torch.tensor(1.0, dtype=torch.float32),
+        torch.tensor(max(0, current_epoch - annealing_start) / (annealing_end - annealing_start), dtype=torch.float32),
+    )
+
+    weights = weights_p * annealinng_coef + weights * (1 - annealinng_coef)
+
+    edl_loss = torch.mean(
+        targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + weights * (
+                    1 - targets) * (
+                torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))) + 20 * torch.relu(1.5 - size).mean()
+
 
     # edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)))
-    return edl_loss + torch.relu(-torch.log(torch.mean(gfb)))
+    return edl_loss #+ torch.relu(-torch.log(torch.mean(gfb)))
 
 # def ava_edl_criterion(B_alpha, B_beta, targets, fbeta=1):
 #     # edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + (1 - targets) * (
