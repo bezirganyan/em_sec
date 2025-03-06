@@ -40,7 +40,9 @@ class EMSECModel(pl.LightningModule):
         evidence_a = F.elu(alpha) + 2  # As in the original implementation.
         evidence_b = F.elu(beta) + 2
 
-        multinomial_evidence = torch.exp(self.multinomial_evidence_collector(logits))
+        logits_evidence = self.multinomial_evidence_collector(logits)
+        logits_evidence = torch.clamp(logits_evidence, max=10.0)
+        multinomial_evidence = torch.exp(logits_evidence)
 
         mask = evidence_a > evidence_b
 
