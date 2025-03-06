@@ -152,14 +152,9 @@ def get_bm_loss(alphas, alpha_a, target):
 
 
 def ava_edl_criterion(B_alpha, B_beta, targets, fbeta=1, current_epoch=0, annealing_start=100, annealing_end=200):
-    # edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + (1 - targets) * (
-    #         torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta)))
-
     probs = B_alpha / (B_alpha + B_beta)
     size = torch.sigmoid(targets.shape[1] * (probs - 0.5)).sum(dim=1)
     num_classes = B_alpha.shape[1]
-    # edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + (1 / (num_classes - 1)) * (1 - targets) * (
-    #         torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))) + 20*torch.relu(1.5 - size).mean()
 
     weights = (1 / (num_classes - 1)) * torch.ones_like(targets)
 
@@ -182,21 +177,7 @@ def ava_edl_criterion(B_alpha, B_beta, targets, fbeta=1, current_epoch=0, anneal
                 torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))) + 20 * torch.relu(1.5 - size).mean()
 
 
-    # edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)))
-    return edl_loss #+ torch.relu(-torch.log(torch.mean(gfb)))
-
-# def ava_edl_criterion(B_alpha, B_beta, targets, fbeta=1):
-#     # edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + (1 - targets) * (
-#     #         torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta)))
-#
-#     probs = B_alpha / (B_alpha + B_beta)
-#     size = torch.sigmoid(10 * (probs - 0.5)).sum(dim=1)
-#     num_classes = B_alpha.shape[1]
-#     edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + (1 / (num_classes - 1)) * (1 - targets) * (
-#             torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))) + 20*torch.relu(1.5 - size).mean()
-#
-#     # edl_loss = torch.mean(targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)))
-#     return edl_loss
+    return edl_loss
 
 
 def edl_hyperloss(func, y, alpha, hyperset_soft_size, epoch_num, num_classes, annealing_step, device, useKL=True, lmda=0.0):
