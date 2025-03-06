@@ -133,12 +133,6 @@ class RxRx1DataModule(pl.LightningDataModule):
             transforms.ToTensor(),
         ])
 
-        self.train_dataset = RxRx1Dataset(data_dir, transform=self.transform, stage='train')
-        n_train = int(len(self.train_dataset) * 0.8)
-        n_val = len(self.train_dataset) - n_train
-        self.train_dataset, self.val_dataset = random_split(self.train_dataset, [n_train, n_val])
-        self.test_dataset = RxRx1Dataset(data_dir, transform=self.transform, stage='test')
-
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=True,
                           persistent_workers=True)
@@ -150,3 +144,12 @@ class RxRx1DataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False,
                           persistent_workers=True)
+
+    def setup(self, stage=None):
+        if stage == 'fit' or stage is None:
+            self.train_dataset = RxRx1Dataset(self.data_dir, transform=self.transform, stage='train')
+            n_train = int(len(self.train_dataset) * 0.8)
+            n_val = len(self.train_dataset) - n_train
+            self.train_dataset, self.val_dataset = random_split(self.train_dataset, [n_train, n_val])
+        if stage == 'test' or stage is None:
+            self.test_dataset = RxRx1Dataset(self.data_dir, transform=self.transform, stage='test')
