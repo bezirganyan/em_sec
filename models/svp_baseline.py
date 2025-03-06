@@ -1,24 +1,23 @@
+import time
+
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.models as models
 import wandb
 from torch.optim import Adam
 from torchmetrics import Accuracy
-from svp_py.multiclass import SVPNet
 
 from metrics import AverageUtility, HyperAccuracy, SetSize, TimeLogger
-from models.conv_models import BasicBlock, ResNet
-import time
+from svp_py.multiclass import SVPNet
 
 
-class CIFAR10SVPModel(pl.LightningModule):
-    def __init__(self, num_classes=10, learning_rate=1e-3, beta=1):
-        super(CIFAR10SVPModel, self).__init__()
+class SVPModel(pl.LightningModule):
+    def __init__(self, model, num_classes=10, learning_rate=1e-3, beta=1):
+        super(SVPModel, self).__init__()
         self.save_hyperparameters()
         self.learning_rate = learning_rate
-        self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
+        self.model = model
         self.num_classes = num_classes
         self.beta_param = beta
         hs = self.model.linear.in_features
@@ -32,7 +31,8 @@ class CIFAR10SVPModel(pl.LightningModule):
         try:
             self.flat = SVPNet(phi=self.model, hidden_size=hs, classes=list(range(num_classes)), hierarchy="none")
         except TypeError:
-            self.flat = SVPNet(phi=self.model, hidden_size=hs, classes=list(range(num_classes)), hierarchy="none", dropout=0.0)
+            self.flat = SVPNet(phi=self.model, hidden_size=hs, classes=list(range(num_classes)), hierarchy="none",
+                               dropout=0.0)
 
     def forward(self, x, y=None):
         return self.flat(x, y)
@@ -61,7 +61,6 @@ class CIFAR10SVPModel(pl.LightningModule):
             if v.device != y_one_hot.device:
                 v.to(y_one_hot.device)
             v.update(svp_preds_f, y_one_hot)
-
 
     def test_step(self, batch, batch_idx):
         x, y = batch

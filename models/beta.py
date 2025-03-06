@@ -1,23 +1,19 @@
 import pytorch_lightning as pl
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.models as models
 import wandb
 from torch.optim import Adam
 from torcheval.metrics import MultilabelAccuracy
 
-from losses import ava_edl_criterion, get_evidential_loss
+from losses import ava_edl_criterion
 from metrics import BetaEvidenceAccumulator, PredictionSetSize
-from models.conv_models import BasicBlock, ResNet
 
 
-class CIFAR10BettaModel(pl.LightningModule):
-    def __init__(self, num_classes=10, learning_rate=1e-3):
-        super(CIFAR10BettaModel, self).__init__()
+class BetaModel(pl.LightningModule):
+    def __init__(self, model, num_classes=10, learning_rate=1e-3):
+        super(BetaModel, self).__init__()
         self.save_hyperparameters()
-        self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
-
+        self.model = model
         self.num_classes = num_classes
         self.alpha = nn.Linear(self.model.linear.in_features, num_classes)
         self.beta = nn.Linear(self.model.linear.in_features, num_classes)
@@ -30,12 +26,12 @@ class CIFAR10BettaModel(pl.LightningModule):
         beta = self.beta(logits)
         return alpha, beta
 
-
     def shared_step(self, batch, batch_idx):
         x, y = batch
         y = F.one_hot(y, self.num_classes)
         logits_a, logits_b = self(x)
-        evidence_a = F.elu(logits_a) + 2 # TODO - in the original implementation, they add 2, but it's not clear why, check this later
+        evidence_a = F.elu(
+            logits_a) + 2  # TODO - in the original implementation, they add 2, but it's not clear why, check this later
         evidence_b = F.elu(logits_b) + 2
         loss = ava_edl_criterion(evidence_a, evidence_b, y)
         return loss, evidence_a, evidence_b, y

@@ -1,18 +1,16 @@
-import math
 import os
 import time
 
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
 import wandb
 from torch.optim import Adam
 from torchmetrics import Accuracy
 
-from models.conv_models import BasicBlock, ResNet
-from models.ds_utils import DM_test, DSNet  # DSNet: your DS-based network implementation
 from metrics import AverageUtility, HyperAccuracy, SetSize, TimeLogger, compute_weights
+from models.ds_utils import DM_test, DSNet  # DSNet: your DS-based network implementation
 
 
 # ---------------- Helper: Power Set ----------------
@@ -27,16 +25,17 @@ def power_set(items):
         set_all.append(combo)
     return sorted(set_all, key=lambda s: (len(s), s))
 
+
 # ---------------- CIFAR10DSModel Lightning Module ----------------
-class CIFAR10DSModel(pl.LightningModule):
-    def __init__(self, num_classes=10, learning_rate=1e-3, prototypes=200, nu=0.9, tol_i=2):
-        super(CIFAR10DSModel, self).__init__()
+class DSModel(pl.LightningModule):
+    def __init__(self, model, num_classes=10, learning_rate=1e-3, prototypes=200, nu=0.9, tol_i=2):
+        super(DSModel, self).__init__()
         self.save_hyperparameters()
         self.num_classes = num_classes
         self.learning_rate = learning_rate
 
         # Backbone: ResNet for feature extraction.
-        self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
+        self.model = model
         hs = self.model.linear.in_features
         self.model.linear = nn.Identity()
 

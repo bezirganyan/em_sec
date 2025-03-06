@@ -1,23 +1,19 @@
 import pytorch_lightning as pl
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torchvision.models as models
 import wandb
 from torch.optim import Adam
-from torchmetrics import Accuracy, CalibrationError
+from torchmetrics import Accuracy
 
 from losses import get_evidential_loss
 from metrics import CorrectIncorrectUncertaintyPlotter, ExpectedCalibrationError
-from models.conv_models import BasicBlock, ResNet
 
 
-class CIFAR10EnnModel(pl.LightningModule):
-    def __init__(self, num_classes=10, learning_rate=1e-3, uncertainty_calibration=False):
-        super(CIFAR10EnnModel, self).__init__()
+class ENNModel(pl.LightningModule):
+    def __init__(self, model, num_classes=10, learning_rate=1e-3, uncertainty_calibration=False):
+        super(ENNModel, self).__init__()
         self.save_hyperparameters()
         self.learning_rate = learning_rate
-        self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
+        self.model = model
         self.num_classes = num_classes
         self.set_metrics()
         self.uncertainty_calibration = uncertainty_calibration

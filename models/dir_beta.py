@@ -4,25 +4,23 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.models as models
 import wandb
 from torch.optim import Adam
 from torcheval.metrics import MulticlassAccuracy
 
-from losses import ava_edl_criterion, get_evidential_hyperloss, get_evidential_loss, get_fbeta_loss
+from losses import ava_edl_criterion, get_evidential_loss
 from metrics import AverageUtility, CorrectIncorrectUncertaintyPlotter, HyperAccuracy, HyperEvidenceAccumulator, \
     HyperSetSize, \
     HyperUncertaintyPlotter, TimeLogger
-from models.conv_models import BasicBlock, ResNet
 
 
-class CIFAR10HyperModel(pl.LightningModule):
-    def __init__(self, num_classes=10, learning_rate=1e-3, beta=1, annealing_start=0, annealing_end=100):
-        super(CIFAR10HyperModel, self).__init__()
+class EMSECModel(pl.LightningModule):
+    def __init__(self, model, num_classes=10, learning_rate=1e-3, beta=1, annealing_start=0, annealing_end=100):
+        super(EMSECModel, self).__init__()
         self.save_hyperparameters()
         self.learning_rate = learning_rate
         self.beta_param = beta
-        self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
+        self.model = model
         self.num_classes = num_classes
         self.alpha = nn.Linear(self.model.linear.in_features, num_classes)
         self.beta = nn.Linear(self.model.linear.in_features, num_classes)
@@ -76,7 +74,7 @@ class CIFAR10HyperModel(pl.LightningModule):
         #                                       10, self.device, beta=self.beta_param)
         # loss_hyper = get_fbeta_loss(evidence_hyper, multilabel_probs, self.beta_param)
         # gamma = torch.relu(torch.tensor(self.current_epoch - 50)) / 50
-        loss = loss_multilabel + loss_edl  #+ gamma * loss_hyper
+        loss = loss_multilabel + loss_edl  # + gamma * loss_hyper
         return loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, multilabel_probs
 
     def training_step(self, batch, batch_idx):

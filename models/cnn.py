@@ -1,26 +1,17 @@
 import pytorch_lightning as pl
-import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.models as models
 import wandb
-from torch.optim import Adam, SGD
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim import Adam
 from torchmetrics import Accuracy
 
-from models.conv_models import BasicBlock, FitNet4, ResNet, ResNet18
-from utils import append_dropout
 
-
-class CIFAR10Model(pl.LightningModule):
-    def __init__(self, num_classes=10, learning_rate=1e-3):
-        super(CIFAR10Model, self).__init__()
+class StandardModel(pl.LightningModule):
+    def __init__(self, model, num_classes=10, learning_rate=1e-3):
+        super(StandardModel, self).__init__()
         self.learning_rate = learning_rate
         self.save_hyperparameters()
-        self.model = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
-        # append_dropout(self.model, 0.3)
-        # self.model = FitNet4(output_dim=num_classes)
+        self.model = model
         self.num_classes = num_classes
-        # self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
         self.set_metrics()
 
     def forward(self, x):
@@ -53,7 +44,6 @@ class CIFAR10Model(pl.LightningModule):
         self.log('train_acc', self.train_acc.compute())
         wandb.log({'train_acc': self.train_acc.compute()}, step=self.current_epoch)
 
-
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
         wandb.log({'val_acc': self.val_acc.compute()}, step=self.current_epoch)
@@ -72,4 +62,3 @@ class CIFAR10Model(pl.LightningModule):
         self.train_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
         self.val_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
         self.test_acc = Accuracy(task='multiclass', num_classes=self.num_classes)
-

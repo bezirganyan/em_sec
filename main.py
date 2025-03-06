@@ -2,17 +2,19 @@
 import argparse
 import wandb
 
-from dataset import CIFAR100DataModule, CIFAR10DataModule
-from models.beta import CIFAR10BettaModel
-from models.cnn import CIFAR10Model
+from dataset import CIFAR100DataModule, CIFAR10DataModule, RxRx1DataModule
+from models.beta import BetaModel
+from models.cnn import StandardModel
 
 import pytorch_lightning as pl
 import torch
 
-from models.dir_beta import CIFAR10HyperModel
-from models.ds_baseline import CIFAR10DSModel
-from models.enn import CIFAR10EnnModel
-from models.svp_baseline import CIFAR10SVPModel
+from models.conv_models import BasicBlock, ResNet
+from models.dir_beta import EMSECModel
+from models.ds_baseline import DSModel
+from models.enn import ENNModel
+from models.linear_models import DenseClassifier
+from models.svp_baseline import SVPModel
 from utils import OnKeyboardInterruptCallback
 
 
@@ -63,32 +65,38 @@ def main():
     if args.dataset == 'cifar10':
         data = CIFAR10DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
         num_classes = 10
+        model_backbone = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
     elif args.dataset == 'cifar100':
         data = CIFAR100DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
         num_classes = 100
+        model_backbone = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
+    elif args.dataset == 'rxrx1':
+        data = RxRx1DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
+        num_classes = 1139
+        model_backbone = DenseClassifier(in_features=128, out_features=num_classes, hidden_features=(256, 256))
     else:
         raise ValueError(f"Dataset {args.dataset} not supported")
     data.setup()
 
     if args.model == 'cnn':
-        model = CIFAR10Model.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
-            CIFAR10Model(num_classes=num_classes, learning_rate=args.learning_rate)
+        model = StandardModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
+            StandardModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate)
     elif args.model == 'enn':
-        model = CIFAR10EnnModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
-            CIFAR10EnnModel(num_classes=num_classes, learning_rate=args.learning_rate, uncertainty_calibration=args.unc_calib)
+        model = ENNModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
+            ENNModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, uncertainty_calibration=args.unc_calib)
     elif args.model == 'beta':
-        model = CIFAR10BettaModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
-            CIFAR10BettaModel(num_classes=num_classes, learning_rate=args.learning_rate)
+        model = BetaModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
+            BetaModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate)
     elif args.model == 'hyper':
-        model = CIFAR10HyperModel.load_from_checkpoint(args.ckpt_path, strict=False) if args.ckpt_path else \
-            CIFAR10HyperModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta,
-                              annealing_start=args.ann_start, annealing_end=args.ann_end)
+        model = EMSECModel.load_from_checkpoint(args.ckpt_path, strict=False) if args.ckpt_path else \
+            EMSECModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta,
+                       annealing_start=args.ann_start, annealing_end=args.ann_end)
     elif args.model == 'ds':
-        model = CIFAR10DSModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
-            CIFAR10DSModel(num_classes=num_classes, learning_rate=args.learning_rate, nu=args.gamma, tol_i=args.toli)
+        model = DSModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
+            DSModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, nu=args.gamma, tol_i=args.toli)
     elif args.model == 'svp':
-        model = CIFAR10SVPModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
-            CIFAR10SVPModel(num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
+        model = SVPModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
+            SVPModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
     else:
         raise ValueError(f"Model {args.model} not supported")
 
