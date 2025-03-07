@@ -1,4 +1,3 @@
-# define the main file for training the model in cnn.py from cifar10 dataset from datasets.py using pytorch_lightning
 import argparse
 import wandb
 
@@ -108,10 +107,8 @@ def main():
         num_sanity_val_steps=0,
         callbacks=[OnKeyboardInterruptCallback()]
     )
-    # get pl logging directory
     log_path = trainer.logger.log_dir
     print(f"Logging to {log_path}")
-    # wandb log as config parameter
     args.log_path = log_path
     wandb.init(project=args.project, name=wandb_name, config=vars(args), mode=wandb_mode)
 
@@ -125,8 +122,22 @@ def main():
             trainer.fit(model, train_dataloader, val_dataloader)
         except KeyboardInterrupt:
             print("\nTraining interrupted. Testing the model")
-    results = trainer.test(model, test_dataloader)[0]
-    print(f'Test results: {results}')
+    if args.model == 'svp':
+        results = trainer.test(model, test_dataloader)[0]
+        print(f'Test results for main beta {args.beta}: {results}')
+        for beta_val in [1, 2, 3, 4, 5, 10]:
+            if beta_val == args.beta:
+                continue
+            wandb.finish()
+            test_wandb_name = wandb_name.replace(f'beta_{args.beta}', f'beta_{beta_val}')
+            wandb.init(project=args.project, name=test_wandb_name, config=vars(args), mode=wandb_mode)
+            model.beta = beta_val
+            results = trainer.test(model, test_dataloader)[0]
+            print(f'Test results for beta {beta_val}: {results}')
+            wandb.finish()
+    else:
+        results = trainer.test(model, test_dataloader)[0]
+        print(f'Test results: {results}')
 
 if __name__ == '__main__':
     main()
