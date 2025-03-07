@@ -414,73 +414,75 @@ class SVP(nn.Module):
         return self.rapsusvphf(input, p)
 
     def gsvbop(self, input, p: SVPParam):
-        out = self.root.clf(input)
+        # Compute softmax probabilities in flat mode.
+        out = self.root.clf(input)  # shape: (batch_size, num_classes)
         out = F.softmax(out, dim=1)
-        preds = []
-        for i in range(input.size(0)):
-            probs = out[i]
-            sorted_idx = torch.argsort(probs, descending=True)
-            yhat = []
-            yhat_p = 0.0
-            ystar = []
-            ystar_u = 0.0
-            for idx in sorted_idx:
-                yhat.append(idx.item())
-                yhat_p += probs[idx].item()
-                if p.svptype == SVPType.FB:
-                    util = yhat_p * (1.0 + p.beta**2) / (len(yhat) + p.beta**2)
-                elif p.svptype == SVPType.DG:
-                    util = yhat_p * (p.delta / len(yhat) - p.gamma / (len(yhat)**2))
-                elif p.svptype == SVPType.SIZECTRL:
-                    if len(yhat) > p.size:
-                        break
-                    else:
-                        util = yhat_p
-                else:
-                    if yhat_p >= 1 - p.error:
-                        util = yhat_p
-                    else:
-                        util = 0
-                if util >= ystar_u:
-                    ystar = copy.copy(yhat)
-                    ystar_u = util
-                else:
-                    break
-            preds.append(ystar)
-        return preds
+        # Sort probabilities in descending order along the class dimension.
+        sorted_probs, sorted_idx = torch.sort(out, dim=1, descending=True)
+        # Compute cumulative sums along the sorted probabilities.
+        cum_probs = torch.cumsum(sorted_probs, dim=1)  # shape: (batch_size, num_classes)
+        batch_size, num_classes = out.shape
+        # Create a vector of indices [1, 2, ..., num_classes].
+        k_vec = torch.arange(1, num_classes + 1, device=out.device).float()  # shape: (num_classes,)
+
+        # Compute the utility for each possible set size according to svptype.
+        if p.svptype == SVPType.FB:
+            # Utility: cum_prob * (1+beta^2) / (k + beta^2)
+            factor = (1.0 + p.beta ** 2) / (k_vec + p.beta ** 2)  # shape: (num_classes,)
+            utility = cum_probs * factor.unsqueeze(0)
+        elif p.svptype == SVPType.DG:
+            # Utility: cum_prob * (delta/k - gamma/k^2)
+            factor = (p.delta / k_vec) - (p.gamma / (k_vec ** 2))
+            utility = cum_probs * factor.unsqueeze(0)
+        elif p.svptype == SVPType.SIZECTRL:
+            # For SIZECTRL, only allow sets with size <= p.size.
+            utility = cum_probs.clone()
+            mask = k_vec > p.size
+            utility[:, mask] = -float('inf')
+        else:  # For ERRORCTRL (or other cases)
+            # Only consider set sizes where cumulative probability exceeds 1-error.
+            utility = cum_probs * (cum_probs >= (1 - p.error)).float()
+
+        # For each sample, choose the cutoff index that maximizes the utility.
+        max_util, max_idx = torch.max(utility, dim=1)  # shape: (batch_size,)
+        pred_sets = []
+        for i in range(batch_size):
+            k = int(max_idx[i].item()) + 1  # +1 to include the class that pushed utility above threshold.
+            pred_sets.append(sorted_idx[i, :k].tolist())
+        return pred_sets
 
     def gsvbop_r(self, input, p: SVPParam):
+        # Compute flat-mode probabilities.
         out = self.root.clf(input)
         out = F.softmax(out, dim=1)
         if self.hstruct is not None:
+            # Multiply by the hierarchy structure (assumed precomputed) if available.
             out = torch.matmul(out, self.hstruct.t())
-        preds = []
-        for i in range(input.size(0)):
-            pred = []
-            si_optimal = 0
-            si_optimal_u = 0.0
-            for si in range(out.size(1)):
-                curr_p = out[i, si].item()
-                if p.svptype == SVPType.FB:
-                    size_val = self.hstruct[si].sum().item() if self.hstruct is not None else 1
-                    util = curr_p * (1.0 + p.beta**2) / (size_val + p.beta**2)
-                elif p.svptype == SVPType.DG:
-                    size_val = self.hstruct[si].sum().item() if self.hstruct is not None else 1
-                    util = curr_p * (p.delta / size_val - p.gamma / (size_val**2))
-                elif p.svptype == SVPType.SIZECTRL:
-                    util = curr_p
-                else:
-                    if curr_p >= 1 - p.error:
-                        util = 1.0 / (self.hstruct[si].sum().item() if self.hstruct is not None else 1)
-                    else:
-                        util = 0
-                if util >= si_optimal_u:
-                    si_optimal = si
-                    si_optimal_u = util
-            if self.hstruct is not None:
-                pred = [j for j in range(self.hstruct.size(1)) if self.hstruct[si_optimal, j].item() == 1]
-            preds.append(pred)
-        return preds
+        # Sort probabilities in descending order.
+        sorted_probs, sorted_idx = torch.sort(out, dim=1, descending=True)
+        cum_probs = torch.cumsum(sorted_probs, dim=1)
+        batch_size, num_cols = out.shape
+        k_vec = torch.arange(1, num_cols + 1, device=out.device).float()
+
+        if p.svptype == SVPType.FB:
+            factor = (1.0 + p.beta ** 2) / (k_vec + p.beta ** 2)
+            utility = cum_probs * factor.unsqueeze(0)
+        elif p.svptype == SVPType.DG:
+            factor = (p.delta / k_vec) - (p.gamma / (k_vec ** 2))
+            utility = cum_probs * factor.unsqueeze(0)
+        elif p.svptype == SVPType.SIZECTRL:
+            utility = cum_probs.clone()
+            mask = k_vec > p.size
+            utility[:, mask] = -float('inf')
+        else:
+            utility = cum_probs * (cum_probs >= (1 - p.error)).float()
+
+        max_util, max_idx = torch.max(utility, dim=1)
+        pred_sets = []
+        for i in range(batch_size):
+            k = int(max_idx[i].item()) + 1
+            pred_sets.append(sorted_idx[i, :k].tolist())
+        return pred_sets
 
     def gsvbop_hf(self, input, p: SVPParam):
         preds = []
