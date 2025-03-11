@@ -160,6 +160,7 @@ def ava_edl_criterion(B_alpha, B_beta, targets, fbeta=1, current_epoch=0, anneal
 
     probs_copy = probs.clone()
     probs_copy = probs_copy.detach()
+    probs_copy = probs_copy * (1 - targets)
     order = torch.argsort(probs_copy, dim=1) + 1
     weights_p = (1 + fbeta ** 2) / (order + fbeta ** 2)
     weights_p = 1 - weights_p
