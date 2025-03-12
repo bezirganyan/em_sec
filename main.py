@@ -133,30 +133,6 @@ def main():
             trainer.fit(model, train_dataloader, val_dataloader)
         except KeyboardInterrupt:
             print("\nTraining interrupted. Testing the model")
-    if args.model == 'svp':
-        results = trainer.test(model, test_dataloader)[0]
-        print(f'Test results for main beta {args.beta}: {results}')
-        trained_state = model.state_dict()
-        for beta_val in [1, 2, 3, 4, 5, 10]:
-            if beta_val == args.beta:
-                continue
-            wandb.finish()
-            test_wandb_name = wandb_name.replace(f'beta_{args.beta}', f'beta_{beta_val}')
-            print(f"Testing model with beta {beta_val}, wandb name: {test_wandb_name}")
-            wandb.init(project=args.project, name=test_wandb_name, config=vars(args), mode=wandb_mode)
-            model_backbone = model_backbone.__class__(**model_config)
-            new_model = SVPModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, beta=beta_val)
-            new_model.load_state_dict(trained_state)
-            new_model.set_params = {
-                "c": num_classes,
-                "svptype": "fb",
-                "beta": beta_val
-            }
-            new_model.beta_param = beta_val
-            results = trainer.test(new_model, test_dataloader)[0]
-            print(f'Test results for beta {beta_val}: {results}')
-            wandb.finish()
-    else:
         results = trainer.test(model, test_dataloader)[0]
         print(f'Test results: {results}')
 
