@@ -189,10 +189,9 @@ def compute_utility_matrix(act_set, class_set, weight_dict, tol_i):
 
 
 class DM_test(nn.Module):
-    def __init__(self, num_class, act_set, weight_dict, tol_i, nu):
+    def __init__(self, num_class, act_set, weight_dict, tol_i):
         super(DM_test, self).__init__()
         self.num_class = num_class
-        self.nu = nu
         # Define the class set (typically 0,1,...,num_class-1)
         class_set = list(range(num_class))
         # Compute the utility matrix deterministically
@@ -200,7 +199,7 @@ class DM_test(nn.Module):
         # Register as a non-trainable buffer; shape: (num_set, num_class)
         self.register_buffer("utility_matrix", torch.tensor(utility_matrix, dtype=torch.float32))
 
-    def forward(self, inputs):
+    def forward(self, inputs, nu):
         # inputs: shape (batch, num_class+1), where the last column is the uncertainty mass
         outputs = []
         for i in range(self.utility_matrix.shape[0]):
@@ -210,11 +209,12 @@ class DM_test(nn.Module):
             min_val = row.min()
             omega_1 = inputs[:, -1:] * max_val
             omega_2 = inputs[:, -1:] * min_val
-            omega = self.nu * omega_1 + (1 - self.nu) * omega_2
+            omega = nu * omega_1 + (1 - nu) * omega_2
             utility_i = precise + omega  # shape: (batch, 1)
             outputs.append(utility_i)
         utility = torch.cat(outputs, dim=-1)  # shape: (batch, num_set)
         return utility
+
 class DM_pignistic(nn.Module):
     """
     DM_pignistic layer in PyTorch. Converts a mass distribution (with omega) into
