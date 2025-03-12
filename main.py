@@ -1,7 +1,10 @@
 import argparse
+
+from fontTools.unicodedata import block
+
 import wandb
 
-from dataset import CIFAR100DataModule, CIFAR10DataModule, RxRx1DataModule
+from dataset import CIFAR100DataModule, CIFAR10DataModule, LUMADataModule, RxRx1DataModule
 from models.beta import BetaModel
 from models.cnn import StandardModel
 
@@ -64,15 +67,23 @@ def main():
     if args.dataset == 'cifar10':
         data = CIFAR10DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
         num_classes = 10
-        model_backbone = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
+        model_config = dict(block=BasicBlock, num_blocks=[2, 2, 2, 2], num_classes=num_classes)
+        model_backbone = ResNet(**model_config)
     elif args.dataset == 'cifar100':
         data = CIFAR100DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
         num_classes = 100
-        model_backbone = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
+        model_config = dict(block=BasicBlock, num_blocks=[2, 2, 2, 2], num_classes=num_classes)
+        model_backbone = ResNet(**model_config)
     elif args.dataset == 'rxrx1':
         data = RxRx1DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
         num_classes = 1139
-        model_backbone = DenseClassifier(in_features=128, out_features=num_classes, hidden_features=(256, 256))
+        model_config = dict(in_features=128, out_features=num_classes, hidden_features=(512, 1024, 1024, 1024), dropout=0.7)
+        model_backbone = DenseClassifier(**model_config)
+    elif args.dataset == 'luma':
+        data = LUMADataModule(batch_size=args.batch_size, num_workers=args.num_workers)
+        num_classes = 50
+        model_config = dict(block=BasicBlock, num_blocks=[2, 2, 2, 2], num_classes=num_classes)
+        model_backbone = ResNet(**model_config)
     else:
         raise ValueError(f"Dataset {args.dataset} not supported")
     data.setup()
@@ -100,7 +111,7 @@ def main():
         raise ValueError(f"Model {args.model} not supported")
 
     trainer = pl.Trainer(
-        accelerator="auto",
+        accelerator="gpu",
         log_every_n_steps=args.log_interval_steps,
         logger=pl.loggers.TensorBoardLogger(args.tensorboard_path, "pipeline"),
         max_epochs=args.epochs,
@@ -131,8 +142,9 @@ def main():
                 continue
             wandb.finish()
             test_wandb_name = wandb_name.replace(f'beta_{args.beta}', f'beta_{beta_val}')
+            print(f"Testing model with beta {beta_val}, wandb name: {test_wandb_name}")
             wandb.init(project=args.project, name=test_wandb_name, config=vars(args), mode=wandb_mode)
-            model_backbone = ResNet(BasicBlock, [2, 2, 2, 2], num_classes=num_classes)
+            model_backbone = model_backbone.__class__(**model_config)
             new_model = SVPModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, beta=beta_val)
             new_model.load_state_dict(trained_state)
             new_model.set_params = {
