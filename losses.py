@@ -1,6 +1,5 @@
 import torch
 import torch.nn.functional as F
-from sentry_sdk.utils import epoch
 from torch import digamma
 from torch.distributions.constraints import multinomial
 from torch.onnx.symbolic_opset11 import argsort
@@ -151,9 +150,33 @@ def get_bm_loss(alphas, alpha_a, target):
     return loss_acc
 
 
-def ava_edl_criterion(B_alpha, B_beta, targets, fbeta=1, current_epoch=0, annealing_start=100, annealing_end=200):
+def soft_fbeta(probs, targets, beta=1.0, epsilon=1e-8):
+    batch_size, num_classes = probs.shape
+
+    soft_includes = []
+    for b in range(batch_size):
+        p_correct = probs[b][targets[b].bool()]  # predicted probs for correct classes
+        if len(p_correct) == 0:
+            soft_includes.append(probs.new_tensor([0.0]))
+        else:
+            prod_not_included = torch.prod(1 - p_correct)
+            soft_includes.append(1.0 - prod_not_included)
+    soft_includes = torch.stack(soft_includes, dim=0)
+    cardinalities = probs.sum(dim=1)
+
+    fbeta_vals = (1.0 + beta**2) / (cardinalities + beta**2 + epsilon)
+    fbeta_vals = fbeta_vals * soft_includes
+
+    return fbeta_vals
+
+
+def ava_edl_criterion(
+    B_alpha, B_beta, targets, fbeta=1.0, current_epoch=0,
+    annealing_start=100, annealing_end=200, lambda_fbeta=0.1
+):
     probs = B_alpha / (B_alpha + B_beta)
     size = torch.sigmoid(targets.shape[1] * (probs - 0.5)).sum(dim=1)
+
     num_classes = B_alpha.shape[1]
 
     weights = (1 / (num_classes - 1)) * torch.ones_like(targets)
@@ -173,12 +196,18 @@ def ava_edl_criterion(B_alpha, B_beta, targets, fbeta=1, current_epoch=0, anneal
     weights = weights_p * annealinng_coef + weights * (1 - annealinng_coef)
 
     edl_loss = torch.mean(
-        targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)) + weights * (
-                    1 - targets) * (
-                torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))) + 20 * torch.relu(1.5 - size).mean()
+        targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha))
+        + weights * (1 - targets) * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))
+    )
+    edl_loss = edl_loss + 20 * torch.relu(1.5 - size).mean()
 
+    fbeta_vals = soft_fbeta(probs, targets, beta=fbeta)
+    fbeta_mean = fbeta_vals.mean()  # average across the batch
 
-    return edl_loss
+    final_loss = edl_loss - lambda_fbeta * fbeta_mean
+
+    return final_loss
+
 
 
 def edl_hyperloss(func, y, alpha, hyperset_soft_size, epoch_num, num_classes, annealing_step, device, useKL=True, lmda=0.0):
