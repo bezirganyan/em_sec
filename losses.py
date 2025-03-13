@@ -172,7 +172,7 @@ def soft_fbeta(probs, targets, beta=1.0, epsilon=1e-8):
 
 def ava_edl_criterion(
     B_alpha, B_beta, targets, fbeta=1.0, current_epoch=0,
-    annealing_start=100, annealing_end=200, lambda_fbeta=0.1
+    annealing_start=100, annealing_end=200, lambda_fbeta=1.0
 ):
     probs = B_alpha / (B_alpha + B_beta)
     size = torch.sigmoid(targets.shape[1] * (probs - 0.5)).sum(dim=1)

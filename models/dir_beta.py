@@ -15,11 +15,12 @@ from metrics import AverageUtility, CorrectIncorrectUncertaintyPlotter, HyperAcc
 
 
 class EMSECModel(pl.LightningModule):
-    def __init__(self, model, num_classes=10, learning_rate=1e-3, beta=1, annealing_start=0, annealing_end=100):
+    def __init__(self, model, num_classes=10, learning_rate=1e-3, beta=1, annealing_start=0, annealing_end=100, lambda_param=1):
         super(EMSECModel, self).__init__()
         self.save_hyperparameters()
         self.learning_rate = learning_rate
         self.beta_param = beta
+        self.lambda_param = lambda_param
         self.model = model
         self.num_classes = num_classes
         self.alpha = nn.Linear(self.model.linear.in_features, num_classes)
@@ -68,7 +69,7 @@ class EMSECModel(pl.LightningModule):
         y = F.one_hot(y, self.num_classes)
         evidence_a, evidence_b, multinomial_evidence, evidence_hyper = self(x)
         loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y, self.beta_param, self.current_epoch,
-                                            self.annealing_start, self.annealing_end)
+                                            self.annealing_start, self.annealing_end, self.lambda_param)
         loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10,
                                        self.device, targets_one_hot=True)
         multilabel_probs = evidence_a / (evidence_a + evidence_b)

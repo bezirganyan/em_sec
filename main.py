@@ -3,6 +3,7 @@ import argparse
 from fontTools.unicodedata import block
 
 import wandb
+wandb.require("legacy-service")
 
 from dataset import CIFAR100DataModule, CIFAR10DataModule, LUMADataModule, RxRx1DataModule
 from models.beta import BetaModel
@@ -34,6 +35,7 @@ def parse_args():
     parser.add_argument('--beta', type=float, default=1)
     parser.add_argument('--ann_start', type=int, default=100)
     parser.add_argument('--ann_end', type=int, default=300)
+    parser.add_argument('--lambda_param', type=float, default=1)
     parser.add_argument('--gamma', type=float, default=0.5)
     parser.add_argument('--toli', type=int, default=2)
     parser.add_argument('--enable-wandb', action='store_true', default=False)
@@ -100,7 +102,7 @@ def main():
     elif args.model == 'hyper':
         model = EMSECModel.load_from_checkpoint(args.ckpt_path, strict=False) if args.ckpt_path else \
             EMSECModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta,
-                       annealing_start=args.ann_start, annealing_end=args.ann_end)
+                       annealing_start=args.ann_start, annealing_end=args.ann_end, lambda_param=args.lambda_param)
     elif args.model == 'ds':
         model = DSModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
             DSModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, nu=args.gamma, tol_i=args.toli)
