@@ -260,7 +260,7 @@ def total_utility(inputs, labels, tol, weight_dict):
 
 def get_fb_measure(inputs, targets, beta=1):
     set_sizes = torch.tensor([len(s) for s in inputs]).to(targets.device)
-    utilities = ((1 + beta ** 2) / (set_sizes + beta ** 2)).mean()
+    utilities = ((1 + beta ** 2) / (set_sizes + beta ** 2))
     corrects = torch.tensor([targets[i].argmax() in inputs[i] for i in range(len(inputs))]).to(targets.device)
     return (utilities * corrects).sum()
 
