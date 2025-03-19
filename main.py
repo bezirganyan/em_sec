@@ -1,16 +1,15 @@
 import argparse
 
-from fontTools.unicodedata import block
-
 import wandb
+
 wandb.require("legacy-service")
 
-from dataset import CIFAR100DataModule, CIFAR10DataModule, LUMADataModule, RxRx1DataModule
+from dataset import CIFAR100DataModule, CIFAR10DataModule, CalTechDataModule, LUMADataModule, \
+    RxRx1DataModule
 from models.beta import BetaModel
 from models.cnn import StandardModel
 
 import pytorch_lightning as pl
-import torch
 
 from models.conv_models import BasicBlock, ResNet
 from models.dir_beta import EMSECModel
@@ -47,6 +46,7 @@ def parse_args():
 
     return parser.parse_args()
 
+
 def wandb_name_from_args(args):
     if args.model == 'cnn':
         return f"{args.model}_{args.dataset}_{args.epochs}_epochs"
@@ -79,13 +79,20 @@ def main():
     elif args.dataset == 'rxrx1':
         data = RxRx1DataModule(batch_size=args.batch_size, num_workers=args.num_workers, data_dir=args.data_dir)
         num_classes = 1139
-        model_config = dict(in_features=128, out_features=num_classes, hidden_features=(512, 1024, 1024, 1024), dropout=0.7)
+        model_config = dict(in_features=128, out_features=num_classes, hidden_features=(512, 1024, 1024, 1024),
+                            dropout=0.7)
         model_backbone = DenseClassifier(**model_config)
     elif args.dataset == 'luma':
         data = LUMADataModule(batch_size=args.batch_size, num_workers=args.num_workers)
         num_classes = 50
         model_config = dict(block=BasicBlock, num_blocks=[2, 2, 2, 2], num_classes=num_classes)
         model_backbone = ResNet(**model_config)
+    elif args.dataset == 'caltech':
+        data = CalTechDataModule(batch_size=args.batch_size, num_workers=args.num_workers)
+        num_classes = 68
+        model_config = dict(in_features=4096, out_features=num_classes, hidden_features=(128,))
+        model_backbone = DenseClassifier(**model_config)
+
     else:
         raise ValueError(f"Dataset {args.dataset} not supported")
     data.setup()
@@ -95,17 +102,20 @@ def main():
             StandardModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate)
     elif args.model == 'enn':
         model = ENNModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
-            ENNModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, uncertainty_calibration=args.unc_calib)
+            ENNModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate,
+                     uncertainty_calibration=args.unc_calib)
     elif args.model == 'beta':
         model = BetaModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
-            BetaModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate)
+            BetaModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta,
+                      lambda_param=args.lambda_param)
     elif args.model == 'hyper':
         model = EMSECModel.load_from_checkpoint(args.ckpt_path, strict=False) if args.ckpt_path else \
             EMSECModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta,
                        annealing_start=args.ann_start, annealing_end=args.ann_end, lambda_param=args.lambda_param)
     elif args.model == 'ds':
         model = DSModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
-            DSModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, nu=args.gamma, tol_i=args.toli)
+            DSModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, nu=args.gamma,
+                    tol_i=args.toli)
     elif args.model == 'svp':
         model = SVPModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
             SVPModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta)
@@ -135,8 +145,9 @@ def main():
             trainer.fit(model, train_dataloader, val_dataloader)
         except KeyboardInterrupt:
             print("\nTraining interrupted. Testing the model")
-        results = trainer.test(model, test_dataloader)[0]
-        print(f'Test results: {results}')
+    results = trainer.test(model, test_dataloader)[0]
+    print(f'Test results: {results}')
+
 
 if __name__ == '__main__':
     main()
