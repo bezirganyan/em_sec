@@ -6,6 +6,8 @@ import numpy as np
 import seaborn as sns
 import torch
 from scipy.optimize import minimize
+from sklearn.metrics import roc_auc_score
+from sympy import hyper
 from torchmetrics import Metric
 from tqdm import tqdm
 
@@ -331,6 +333,78 @@ class SetSize(Metric):
     def compute(self):
         return self.set_sizes.float().mean()
 
+class HyperUncertaintyPlotter(Metric):
+    def __init__(self, **kwargs):
+        super(HyperUncertaintyPlotter, self).__init__(**kwargs)
+        self.add_state('hyper_uncertainties', default=torch.tensor([]), dist_reduce_fx='cat')
+        self.add_state('hyper_corrects', default=torch.tensor([]), dist_reduce_fx='cat')
+        self.add_state('corrects', default=torch.tensor([]), dist_reduce_fx='cat')
+        self.add_state('uncertainties', default=torch.tensor([]), dist_reduce_fx='cat')
+        self.add_state('entropy', default=torch.tensor([]), dist_reduce_fx='cat')
+
+    def update(self, inputs, hyper_inputs, hyper_evidences, labels):
+        hyper_corrects = torch.tensor([labels[i].argmax() in hyper_inputs[i] for i in range(len(hyper_inputs))]).to(labels.device)
+        hyper_uncertainties = hyper_evidences.shape[1] / (hyper_evidences + 1).sum(dim=1)
+        self.hyper_uncertainties = torch.cat((self.hyper_uncertainties, hyper_uncertainties))
+        self.hyper_corrects = torch.cat((self.hyper_corrects, hyper_corrects))
+
+        corrects = (inputs.argmax(dim=1) == labels.argmax(1)).float()
+        uncertainties = inputs.shape[1] / (inputs + 1).sum(dim=1)
+        probs = (inputs + 1) / (inputs + 1).sum(dim=1).unsqueeze(1)
+        entropy = -torch.sum(probs * torch.log(probs), dim=1)
+        self.corrects = torch.cat((self.corrects, corrects))
+        self.uncertainties = torch.cat((self.uncertainties, uncertainties))
+        self.entropy = torch.cat((self.entropy, entropy))
+
+    def merge_state(self, metrics):
+        for metric in metrics:
+            self.hyper_uncertainties = torch.cat((self.hyper_uncertainties, metric.hyper_uncertainties))
+            self.hyper_corrects = torch.cat((self.hyper_corrects, metric.hyper_corrects))
+            self.corrects = torch.cat((self.corrects, metric.corrects))
+            self.uncertainties = torch.cat((self.uncertainties, metric.uncertainties))
+            self.entropy = torch.cat((self.entropy, metric.entropy))
+
+    def compute(self):
+        return self.uncertainties
+
+    def plot(self):
+        uncertainties = self.uncertainties.cpu().numpy()
+        corrects = self.corrects.cpu().numpy()
+        hyper_uncertainties = self.hyper_uncertainties.cpu().numpy()
+        hyper_corrects = self.hyper_corrects.cpu().numpy()
+
+        corrects_uncertainty = uncertainties[corrects > 0.5]
+        incorrects_uncertainty = uncertainties[corrects < 0.5]
+        hyper_corrects_uncertainty = hyper_uncertainties[hyper_corrects > 0.5]
+        hyper_incorrects_uncertainty = hyper_uncertainties[hyper_corrects < 0.5]
+
+        figure, axes = plt.subplots(1, 2, figsize=(12, 3))
+        sns.kdeplot(corrects_uncertainty, label='Correct', color='g', ax=axes[0])
+        sns.kdeplot(incorrects_uncertainty, label='Incorrect', color='r', ax=axes[0])
+        axes[0].set_xlabel('Uncertainty')
+        axes[0].set_ylabel('Density')
+        axes[0].set_title('Uncertainties of Multinomial Head')
+        axes[0].legend()
+        auc = roc_auc_score(self.corrects.cpu().numpy(), 1 - self.uncertainties.cpu().numpy())
+        axes[0].text(0.5, 0.9, f'AUC: {auc:.2f}', fontsize=12, ha='center', va='top', transform=axes[0].transAxes)
+
+        sns.kdeplot(hyper_corrects_uncertainty, label='Correct', color='g', ax=axes[1])
+        sns.kdeplot(hyper_incorrects_uncertainty, label='Incorrect', color='r', ax=axes[1])
+        axes[1].set_xlabel('Uncertainty')
+        axes[1].set_ylabel('Density')
+        axes[1].set_title('Final Uncertainties')
+        # set x limits to be the 0-1 range
+        axes[0].set_xlim(0, 1)
+        axes[1].set_xlim(0, 1)
+
+        # compute AUC of hyper_uncertainty and misclassification
+        auc = roc_auc_score(self.hyper_corrects.cpu().numpy(), 1 - self.hyper_uncertainties.cpu().numpy())
+        axes[1].text(0.5, 0.9, f'AUC: {auc:.2f}', fontsize=12, ha='center', va='top', transform=axes[1].transAxes)
+
+        # add legend to the last plot
+        axes[1].legend()
+        plt.savefig('hyper_uncertainty.png', dpi=300, bbox_inches='tight')
+        plt.show()
 
 class CorrectIncorrectUncertaintyPlotter(Metric):
     def __init__(self, **kwargs):
@@ -371,48 +445,29 @@ class CorrectIncorrectUncertaintyPlotter(Metric):
         plt.ylabel('Density')
         plt.title('Correct vs Incorrect Uncertainty')
         plt.legend()
+        plt.savefig('correct_incorrect_uncertainty.png', dpi=300, bbox_inches='tight')
         plt.show()
 
-        # plot scatterplot of uncertainty vs entropy with corrects and incorrects as hue
-        sns.scatterplot(x=self.uncertainties.cpu().numpy(), y=self.entropy.cpu().numpy(), hue=self.corrects.cpu().numpy())
-        plt.xlabel('Uncertainty')
-        plt.ylabel('Entropy')
-        plt.title('Uncertainty vs Entropy')
-        plt.show()
+        plt.subplots(figsize=(8, 3))
+        sns.scatterplot(x=self.uncertainties.cpu().numpy(),
+                        y=self.entropy.cpu().numpy(),
+                        hue=self.corrects.cpu().numpy(),
+                        palette=['r', 'g'],
+                        hue_order=[0, 1])
 
+        plt.xlabel('Epistemic Uncertainty')
+        plt.ylabel('Aleatoric Uncertainty')
+        plt.title('Aleatoric vs Epistemic Uncertainty')
 
-class HyperUncertaintyPlotter(Metric):
-    def __init__(self, **kwargs):
-        super(HyperUncertaintyPlotter, self).__init__(**kwargs)
-        self.add_state('uncertainties', default=torch.tensor([]), dist_reduce_fx='cat')
-        self.add_state('corrects', default=torch.tensor([]), dist_reduce_fx='cat')
+        handles, labels = plt.gca().get_legend_handles_labels()
 
-    def update(self, inputs, evidences, labels):
-        corrects = torch.tensor([labels[i].argmax() in inputs[i] for i in range(len(inputs))]).to(labels.device)
-        uncertainties = evidences.shape[1] / (evidences + 1).sum(dim=1)
-        self.uncertainties = torch.cat((self.uncertainties, uncertainties))
-        self.corrects = torch.cat((self.corrects, corrects))
+        if labels and labels[0] == 'Correct':
+            handles, labels = handles[1:], labels[1:]
 
-    def merge_state(self, metrics):
-        for metric in metrics:
-            self.uncertainties = torch.cat((self.uncertainties, metric.uncertainties))
+        custom_labels = ['Incorrectly classified', 'Correctly classified']
+        plt.legend(handles, custom_labels, title='Correct')
 
-    def compute(self):
-        return self.uncertainties
-
-    def plot(self):
-        uncertainties = self.uncertainties.cpu().numpy()
-        corrects = self.corrects.cpu().numpy()
-
-        corrects_uncertainty = uncertainties[corrects > 0.5]
-        incorrects_uncertainty = uncertainties[corrects < 0.5]
-
-        sns.kdeplot(corrects_uncertainty, label='Correct', color='g')
-        sns.kdeplot(incorrects_uncertainty, label='Incorrect', color='r')
-        plt.xlabel('Uncertainty')
-        plt.ylabel('Density')
-        plt.title('Hyper Uncertainty')
-        plt.legend()
+        plt.savefig('uncertainty_entropy.png', dpi=300, bbox_inches='tight')
         plt.show()
 
 
