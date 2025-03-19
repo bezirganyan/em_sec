@@ -179,7 +179,7 @@ def ava_edl_criterion(
 
     num_classes = B_alpha.shape[1]
 
-    weights = (1 / (num_classes - 1)) * torch.ones_like(targets)
+    weights = (1 / (num_classes - 1)) * torch.ones_like(targets) * lambda_fbeta
 
     probs_copy = probs.clone()
     probs_copy = probs_copy.detach()
@@ -193,18 +193,18 @@ def ava_edl_criterion(
         torch.tensor(max(0, current_epoch - annealing_start) / (annealing_end - annealing_start), dtype=torch.float32),
     )
 
-    weights = weights_p * annealinng_coef + weights * (1 - annealinng_coef)
+    # weights = weights_p * annealinng_coef + weights * (1 - annealinng_coef)
 
     edl_loss = torch.mean(
         targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha))
         + weights * (1 - targets) * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))
     )
-    edl_loss = edl_loss + 20 * torch.relu(1.5 - size).mean()
+    edl_loss = edl_loss + 20 * torch.relu(2.0 - size).mean()
 
     fbeta_vals = soft_fbeta(probs, targets, beta=fbeta)
     fbeta_mean = fbeta_vals.mean()  # average across the batch
 
-    final_loss = edl_loss - lambda_fbeta * fbeta_mean
+    final_loss = edl_loss - annealinng_coef * lambda_fbeta * fbeta_mean
 
     return final_loss
 
