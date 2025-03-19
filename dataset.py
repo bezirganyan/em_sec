@@ -1,14 +1,17 @@
 import os
 
+import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
-import torchaudio
 import torchvision
 import torchvision.transforms as transforms
-from torch.utils.data import DataLoader, Dataset
+from sklearn.preprocessing import MinMaxScaler
+from torch.utils.data import DataLoader, Dataset, Subset
 from torch.utils.data import random_split
 from torchvision.transforms import v2
+import scipy.io as sio
+
 
 
 class CIFAR10DataModule(pl.LightningDataModule):
@@ -234,3 +237,126 @@ class LUMADataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers, shuffle=False,
                           persistent_workers=True)
+
+
+class MultiViewDataset(Dataset):
+    def __init__(self, data_name, data_X, data_Y):
+        super(MultiViewDataset, self).__init__()
+        self.data_name = data_name
+
+        self.X = dict()
+        self.num_views = data_X.shape[0]
+        for v in range(self.num_views):
+            self.X[v] = self.normalize(data_X[v])
+
+        self.Y = data_Y
+        self.Y = np.squeeze(self.Y)
+        if np.min(self.Y) == 1:
+            self.Y = self.Y - 1
+        self.Y = self.Y.astype(dtype=np.int64)
+        self.num_classes = len(np.unique(self.Y))
+        self.dims = self.get_dims()
+
+    def __getitem__(self, index):
+        data = (self.X[0][index]).astype(np.float32)
+        target = self.Y[index]
+        return data, target
+
+    def __len__(self):
+        return len(self.X[0])
+
+    def get_dims(self):
+        dims = []
+        for view in range(self.num_views):
+            dims.append([self.X[view].shape[1]])
+        return np.array(dims)
+
+    @staticmethod
+    def normalize(x, min=0):
+        if min == 0:
+            scaler = MinMaxScaler((0, 1))
+        else:  # min=-1
+            scaler = MinMaxScaler((-1, 1))
+        norm_x = scaler.fit_transform(x)
+        return norm_x
+
+    def postprocessing(self, index, addNoise=False, sigma=0, ratio_noise=0.5, addConflict=False, ratio_conflict=0.5):
+        if addNoise:
+            self.addNoise(index, ratio_noise, sigma=sigma)
+        if addConflict:
+            self.addConflict(index, ratio_conflict)
+        pass
+
+    def addNoise(self, index, ratio, sigma):
+        selects = np.random.choice(index, size=int(ratio * len(index)), replace=False)
+        for i in selects:
+            views = np.random.choice(np.array(self.num_views), size=np.random.randint(self.num_views), replace=False)
+            for v in views:
+                self.X[v][i] = np.random.normal(self.X[v][i], sigma)
+        pass
+
+    def addConflict(self, index, ratio):
+        records = dict()
+        for c in range(self.num_classes):
+            i = np.where(self.Y == c)[0][0]
+            temp = dict()
+            for v in range(self.num_views):
+                temp[v] = self.X[v][i]
+            records[c] = temp
+        selects = np.random.choice(index, size=int(ratio * len(index)), replace=False)
+        for i in selects:
+            v = np.random.randint(self.num_views)
+            self.X[v][i] = records[(self.Y[i] + 1) % self.num_classes][v]
+        pass
+
+
+def CalTech():
+    # dims of views: 484 256 279
+    data_path = "data/2view-caltech101-8677sample.mat"
+    data = sio.loadmat(data_path)
+    data_X = data['X'][0]
+    data_Y = data['gt']
+    # Take the first 10 categories
+    data_Y = data_Y - 1
+    data_X[0] = data_X[0][:, data_Y.reshape(-1) < 10]
+    data_X[1] = data_X[1][:, data_Y.reshape(-1) < 10]
+    data_Y = data_Y[data_Y < 10]
+    for v in range(len(data_X)):
+        data_X[v] = data_X[v].T
+    return MultiViewDataset("CalTech", data_X, data_Y)
+
+
+class CalTechDataModule(pl.LightningDataModule):
+    def __init__(self, data_dir: str = './data', batch_size: int = 32, num_workers: int = 1):
+        super().__init__()
+        self.data_dir = data_dir
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+
+    def setup(self, stage=None):
+        dataset = CalTech()
+        num_samples = len(dataset)
+        self.num_classes = dataset.num_classes
+        self.num_views = dataset.num_views
+        self.dims = dataset.dims
+        index = np.arange(num_samples)
+        #set seed
+        np.random.seed(42)
+        np.random.shuffle(index)
+        train_index, test_index = index[:int(0.8 * num_samples)], index[int(0.8 * num_samples):]
+        train_index, val_index = train_index[:int(0.8 * len(train_index))], train_index[int(0.8 * len(train_index)):]
+        dataset.addNoise(train_index, 1.0, 5)
+        dataset.addNoise(val_index, 1.0, 5)
+        dataset.addNoise(test_index, 1.0, 5)
+        self.train_dataset = Subset(dataset, train_index)
+        self.test_dataset = Subset(dataset, test_index)
+        self.val_dataset = Subset(dataset, val_index)
+
+    def train_dataloader(self):
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
