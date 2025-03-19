@@ -36,8 +36,8 @@ class EMSECModel(pl.LightningModule):
         # Compute logits and apply ReLU.
         logits = torch.relu(self.model(x))
 
-        alpha = self.alpha(logits)
-        beta = self.beta(logits)
+        alpha = self.alpha(logits.detach())
+        beta = self.beta(logits.detach())
         evidence_a = F.elu(alpha) + 2  # As in the original implementation.
         evidence_b = F.elu(beta) + 2
 
@@ -127,7 +127,7 @@ class EMSECModel(pl.LightningModule):
         duration = time.time() - time_start
         self.test_time_logger.update(duration)
         self.cor_unc_plot.update(multinomial_evidence, y.argmax(dim=1))
-        self.hyper_uncertainty_plot.update(pred_sets, evidence_hyper, y)
+        self.hyper_uncertainty_plot.update(multinomial_evidence, pred_sets, evidence_hyper, y)
         self.test_acc.update(pred_sets, y)
         for utility in self.test_utility_dict.values():
             if utility.device != self.device:
@@ -229,8 +229,8 @@ class EMSECModel(pl.LightningModule):
         self.val_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
         self.test_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
 
-        self.cor_unc_plot = CorrectIncorrectUncertaintyPlotter()
         self.hyper_uncertainty_plot = HyperUncertaintyPlotter()
+        self.cor_unc_plot = CorrectIncorrectUncertaintyPlotter()
         self.test_time_logger = TimeLogger()
         self.test_time_logger_as_list = TimeLogger()
 
