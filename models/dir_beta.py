@@ -139,7 +139,7 @@ class EMSECModel(pl.LightningModule):
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
         probs = evidence_a / (evidence_a + evidence_b)
-        hyperset = (probs > 0.9).float()
+        hyperset = (probs > 0.5).float()
         y_hat_idx_idx = evidence_hyper.argmax(dim=1)
         mask = y_hat_idx_idx == self.num_classes
         y_hyper = multinomial_evidence.argmax(dim=1)
