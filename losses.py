@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import digamma
@@ -164,53 +165,44 @@ def soft_fbeta(probs, targets, beta=1.0, epsilon=1e-8):
     soft_includes = torch.stack(soft_includes, dim=0)
     cardinalities = probs.sum(dim=1)
 
-    fbeta_vals = (1.0 + beta**2) / (cardinalities + beta**2 + epsilon)
+    fbeta_vals = (2.0 + beta ** 2) / (cardinalities + beta ** 2 + epsilon)
     fbeta_vals = fbeta_vals * soft_includes
 
     return fbeta_vals
 
 
 def ava_edl_criterion(
-    B_alpha, B_beta, targets, fbeta=1.0, current_epoch=0,
-    annealing_start=100, annealing_end=200, lambda_fbeta=1.0
+        B_alpha, B_beta, targets, fbeta=1.0, current_epoch=0,
+        annealing_start=100, annealing_end=200, lambda_fbeta=1.0,
+        T_cls=1.0  # threshold for classification loss to trigger relaxation
 ):
     probs = B_alpha / (B_alpha + B_beta)
     size = torch.sigmoid(targets.shape[1] * (probs - 0.5)).sum(dim=1)
 
-    num_classes = B_alpha.shape[1]
+    cls_loss_per_inst = (targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha))).sum(dim=1)
+    cls_loss = torch.mean(cls_loss_per_inst)
 
-    weights = (1 / (num_classes - 1)) * torch.ones_like(targets)
+    loss = cls_loss + 20 * torch.relu(2.0 - size).mean()
 
-    probs_copy = probs.clone()
-    probs_copy = probs_copy.detach()
-    probs_copy = probs_copy * (1 - targets)
-    order = torch.argsort(probs_copy, dim=1) + 1
-    weights_p = (1 + fbeta ** 2) / (order + fbeta ** 2)
-    weights_p = 1 - weights_p
+    soft_sizes = torch.sigmoid(((probs * (1 - targets)) - 0.5) * targets.shape[1]).sum(dim=1)
+    if annealing_end > annealing_start:
+        annealing_factor = np.clip((current_epoch - annealing_start) / (annealing_end - annealing_start), 0, 1)
+    else:
+        annealing_factor = 1.0
 
-    annealinng_coef = torch.min(
-        torch.tensor(1.0, dtype=torch.float32),
-        torch.tensor(max(0, current_epoch - annealing_start) / (annealing_end - annealing_start), dtype=torch.float32),
-    )
+    misclass_factor = torch.sigmoid(cls_loss_per_inst - T_cls)
+    adaptive_lambda = lambda_fbeta * (1 - annealing_factor * misclass_factor)
 
-    # weights = weights_p * annealinng_coef + weights * (1 - annealinng_coef)
+    size_penalty_per_inst = (1 - soft_sizes) ** 2
+    adaptive_size_loss = (adaptive_lambda * size_penalty_per_inst).mean()
 
-    edl_loss = torch.mean(
-        targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha))
-        + weights * (1 - targets) * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))
-    )
-    edl_loss = edl_loss + 20 * torch.relu(2.0 - size).mean()
-
-    fbeta_vals = soft_fbeta(probs, targets, beta=fbeta)
-    fbeta_mean = fbeta_vals.mean()  # average across the batch
-
-    final_loss = edl_loss - lambda_fbeta * fbeta_mean * annealinng_coef
+    final_loss = loss + adaptive_size_loss
 
     return final_loss
 
 
-
-def edl_hyperloss(func, y, alpha, hyperset_soft_size, epoch_num, num_classes, annealing_step, device, useKL=True, lmda=0.0):
+def edl_hyperloss(func, y, alpha, hyperset_soft_size, epoch_num, num_classes, annealing_step, device, useKL=True,
+                  lmda=0.0):
     y = y.to(device)
     alpha = alpha.to(device)
     S = torch.sum(alpha, dim=1, keepdim=True)
@@ -234,7 +226,8 @@ def edl_hyperloss(func, y, alpha, hyperset_soft_size, epoch_num, num_classes, an
 
 
 def edl_digamma_hyperloss(alpha, target, hyperset_soft_size, epoch_num, num_classes, annealing_step, device):
-    loss = edl_hyperloss(torch.digamma, target, alpha, hyperset_soft_size, epoch_num, num_classes, annealing_step, device)
+    loss = edl_hyperloss(torch.digamma, target, alpha, hyperset_soft_size, epoch_num, num_classes, annealing_step,
+                         device)
     return torch.mean(loss)
 
 
@@ -253,9 +246,8 @@ def get_subjective_constraint(evidence, multilabel_probs):
     return projected_probability
 
 
-
-
-def get_evidential_hyperloss(evidence, multilabel_probs, target, epoch_num, num_classes, annealing_step, device, beta=1):
+def get_evidential_hyperloss(evidence, multilabel_probs, target, epoch_num, num_classes, annealing_step, device,
+                             beta=1):
     # pp = get_subjective_constraint(evidence, multilabel_probs)
     hyperset = (multilabel_probs > 0.5).int()
     hyperset_corrects = ((hyperset & target.int()).sum(dim=1) > 0).unsqueeze(-1)
@@ -263,12 +255,13 @@ def get_evidential_hyperloss(evidence, multilabel_probs, target, epoch_num, num_
     target = torch.cat((target, torch.ones(target.shape[0], 1).to(device)), dim=1)
     hyperset_soft_size = torch.sigmoid(1000 * (multilabel_probs - 0.5)).sum(dim=1)
 
-    gfb = (1+beta**2) / (hyperset_soft_size + beta**2)
+    gfb = (1 + beta ** 2) / (hyperset_soft_size + beta ** 2)
     discount = torch.ones(target.shape[0], target.shape[1] - 1).to(device)
     discount = torch.cat((discount, gfb.unsqueeze(-1)), dim=1)
     # target = target * discount
     alpha_a = evidence + 1
-    loss_acc = edl_digamma_hyperloss(alpha_a, target, hyperset_soft_size, epoch_num, num_classes, annealing_step, device)
+    loss_acc = edl_digamma_hyperloss(alpha_a, target, hyperset_soft_size, epoch_num, num_classes, annealing_step,
+                                     device)
     return loss_acc
 
 
@@ -278,8 +271,9 @@ def get_fbeta_loss(evidence, multilabel_probs, beta=1):
     hyper_choices = (evidence.argmax(dim=1) == evidence.shape[1] - 1)
     soft_sizes[hyper_choices] *= hyperset_soft_size[hyper_choices]
 
-    gfb = (1+beta**2) / (soft_sizes + beta**2)
+    gfb = (1 + beta ** 2) / (soft_sizes + beta ** 2)
     return -torch.log(gfb).mean()
+
 
 def get_equivalence_loss(multinomial_evidence, hyper_evidence):
     beliefs_m = multinomial_evidence / (multinomial_evidence + 1).sum(dim=1, keepdim=True)
@@ -293,7 +287,7 @@ def get_equivalence_loss(multinomial_evidence, hyper_evidence):
 def get_utility_loss(evidence, multilabel_probs, target, beta, device):
     set_utility = torch.ones(target.shape[0], 1).to(device)
     hyperset_soft_size = torch.sigmoid(10000 * (multilabel_probs - 0.5)).sum(dim=1)
-    gfb = (1+beta**2) / (hyperset_soft_size + beta**2)
+    gfb = (1 + beta ** 2) / (hyperset_soft_size + beta ** 2)
     set_utility = set_utility * gfb.unsqueeze(-1)
     target = torch.cat((target, set_utility), dim=1)
     probs = (evidence + 1) / (evidence + 1).sum(dim=1, keepdim=True)
@@ -313,5 +307,5 @@ def uncertainty_calibration_loss(evidence, target, annealing_factor, epoch_num, 
     lambda_t = annealing_factor * torch.exp(-epoch_num * (torch.log(annealing_factor) / total_epochs))
     probs = torch.max(probs, dim=1).values.reshape(-1, 1)
     corr_loss = - lambda_t * probs * torch.log(1 - uncertainty + eps) * corrects
-    incor_loss =  (1 - lambda_t) * ((1 - probs) * torch.log(uncertainty + eps) * (1 - corrects))
+    incor_loss = (1 - lambda_t) * ((1 - probs) * torch.log(uncertainty + eps) * (1 - corrects))
     return torch.mean(corr_loss + incor_loss)
