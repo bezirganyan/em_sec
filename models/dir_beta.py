@@ -31,14 +31,15 @@ class EMSECModel(pl.LightningModule):
         # self.hyper_evidence_collector = nn.Linear(num_classes * 2, num_classes + 1)
         self.model.linear = nn.Identity()
         self.set_metrics()
+        self.automatic_optimization = False
 
     def forward(self, x):
         # Compute logits and apply ReLU.
         logits = torch.relu(self.model(x))
 
-        alpha = self.alpha(logits.detach())
-        beta = self.beta(logits.detach())
-        evidence_a = F.elu(alpha) + 2  # As in the original implementation.
+        alpha = self.alpha(logits.detach().clone())
+        beta = self.beta(logits.detach().clone())
+        evidence_a = F.elu(alpha) + 2
         evidence_b = F.elu(beta) + 2
 
         logits_evidence = self.multinomial_evidence_collector(logits)
@@ -73,27 +74,44 @@ class EMSECModel(pl.LightningModule):
         loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10,
                                        self.device, targets_one_hot=True)
         multilabel_probs = evidence_a / (evidence_a + evidence_b)
-        # loss_hyper = get_evidential_hyperloss(evidence_hyper, multilabel_probs, y, self.current_epoch, self.num_classes,
-        #                                       10, self.device, beta=self.beta_param)
-        # loss_hyper = get_fbeta_loss(evidence_hyper, multilabel_probs, self.beta_param)
-        # gamma = torch.relu(torch.tensor(self.current_epoch - 50)) / 50
-        loss = loss_multilabel + loss_edl  # + gamma * loss_hyper
-        return loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, multilabel_probs
+
+        # Return individual losses instead of their sum
+        return loss_multilabel, loss_edl, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, multilabel_probs
 
     def training_step(self, batch, batch_idx):
-        loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(batch,
-                                                                                                           batch_idx)
-        self.log('train_loss', loss, prog_bar=True)
+        # Get optimizers
+        opt_multilabel, opt_evidence = self.optimizers()
+
+        # Get individual losses and other outputs
+        loss_multilabel, loss_edl, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, multilabel_probs = self.shared_step(
+            batch, batch_idx)
+
+        # Optimize multilabel loss
+        opt_multilabel.zero_grad()
+        self.manual_backward(loss_multilabel)
+        opt_multilabel.step()
+
+        # Optimize evidence loss
+        opt_evidence.zero_grad()
+        self.manual_backward(loss_edl)
+        opt_evidence.step()
+
+        # Log the combined loss for tracking purposes
+        total_loss = loss_multilabel + loss_edl
+        self.log('train_loss', total_loss, prog_bar=True)
+
+        # Update metrics
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
         self.train_multiclass_acc.update(multinomial_evidence.argmax(dim=1), y.argmax(dim=1))
-        self.train_set_size.update(y_hat, hyperset > 0.5, y)
+        self.train_set_size.update(y_hat, multilabel_probs > 0.5, y)
 
-        return loss
+        return total_loss
 
     def validation_step(self, batch, batch_idx):
-        loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(batch,
-                                                                                                           batch_idx)
+        loss_multilabel, loss_edl, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(
+            batch, batch_idx)
+        loss = loss_multilabel + loss_edl
         self.log('val_loss', loss, prog_bar=True)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
@@ -108,8 +126,9 @@ class EMSECModel(pl.LightningModule):
             utility.update(pred_sets, y)
 
     def test_step(self, batch, batch_idx):
-        loss, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(batch,
-                                                                                                           batch_idx)
+        loss_multilabel, loss_edl, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(
+                batch, batch_idx)
+        loss = loss_multilabel + loss_edl
         self.log('test_loss', loss)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
@@ -188,7 +207,15 @@ class EMSECModel(pl.LightningModule):
         self.test_set_size.plot()
 
     def configure_optimizers(self):
-        return Adam(self.parameters(), lr=self.learning_rate)
+        # First optimizer for multilabel components (alpha and beta)
+        multilabel_params = list(self.alpha.parameters()) + list(self.beta.parameters())
+        opt_multilabel = Adam(multilabel_params, lr=self.learning_rate)
+
+        # Second optimizer for multinomial evidence collector and base model
+        evidence_params = list(self.multinomial_evidence_collector.parameters()) + list(self.model.parameters())
+        opt_evidence = Adam(evidence_params, lr=self.learning_rate)
+
+        return [opt_multilabel, opt_evidence]
 
     def set_metrics(self):
         self.train_acc = HyperAccuracy()
