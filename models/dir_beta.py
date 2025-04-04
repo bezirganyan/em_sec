@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import wandb
 from torch.optim import Adam
-from torcheval.metrics import MulticlassAccuracy
+from torcheval.metrics import MulticlassAccuracy, MultilabelAccuracy
 
 from losses import ava_edl_criterion, get_evidential_loss
 from metrics import AverageUtility, CorrectIncorrectUncertaintyPlotter, HyperAccuracy, HyperEvidenceAccumulator, \
@@ -105,6 +105,7 @@ class EMSECModel(pl.LightningModule):
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
         self.train_multiclass_acc.update(multinomial_evidence.argmax(dim=1), y.argmax(dim=1))
         self.train_set_size.update(y_hat, multilabel_probs > 0.5, y)
+        self.train_multilabel_acc.update(multilabel_probs, y)
 
         return total_loss
 
@@ -120,6 +121,7 @@ class EMSECModel(pl.LightningModule):
         y_hat_idx_idx = evidence_hyper.argmax(dim=1)
         pred_sets = self.predict_set(batch[0], as_list=True)
         self.val_acc.update(pred_sets, y)
+        self.val_multilabel_acc.update(hyperset, y)
         for utility in self.val_utility_dict.values():
             if utility.device != self.device:
                 utility.to(self.device)
@@ -148,6 +150,7 @@ class EMSECModel(pl.LightningModule):
         self.cor_unc_plot.update(multinomial_evidence, y.argmax(dim=1))
         self.hyper_uncertainty_plot.update(multinomial_evidence, pred_sets, evidence_hyper, y)
         self.test_acc.update(pred_sets, y)
+        self.test_multilabel_acc.update(hyperset, y)
         for utility in self.test_utility_dict.values():
             if utility.device != self.device:
                 utility.to(self.device)
@@ -173,16 +176,23 @@ class EMSECModel(pl.LightningModule):
     def on_train_epoch_end(self) -> None:
         self.log('train_multiclass_acc', self.train_multiclass_acc.compute(), prog_bar=True)
         self.log('train_set_size', self.train_set_size.compute())
+        self.log('train_acc', self.train_acc.compute(), prog_bar=True)
+        self.log('train_multilabel_acc', self.train_multilabel_acc.compute(), prog_bar=True)
         wandb.log({'train_set_size': self.train_set_size.compute()}, step=self.current_epoch)
         wandb.log({'train_acc': self.train_acc.compute()}, step=self.current_epoch)
+        wandb.log({'train_multiclass_acc': self.train_multiclass_acc.compute()}, step=self.current_epoch)
+        wandb.log({'train_multilabel_acc': self.train_multilabel_acc.compute()}, step=self.current_epoch)
+
 
     def on_validation_epoch_end(self) -> None:
         self.log('val_acc', self.val_acc.compute(), prog_bar=True)
         self.log('val_set_size', self.val_set_size.compute(), prog_bar=True)
         self.log('val_multiclass_acc', self.val_multiclass_acc.compute(), prog_bar=True)
+        self.log('val_multilabel_acc', self.val_multilabel_acc.compute(), prog_bar=True)
         wandb.log({'val_set_size': self.val_set_size.compute()}, step=self.current_epoch)
         wandb.log({'val_acc': self.val_acc.compute()}, step=self.current_epoch)
         wandb.log({'val_multiclass_acc': self.val_multiclass_acc.compute()}, step=self.current_epoch)
+        wandb.log({'val_multilabel_acc': self.val_multilabel_acc.compute()}, step=self.current_epoch)
         for key, utility in self.val_utility_dict.items():
             progress_bar = True if 'fb' in key else False
             self.log(f'val_{key}', utility.compute(), prog_bar=progress_bar)
@@ -194,11 +204,13 @@ class EMSECModel(pl.LightningModule):
         self.log('test_multiclass_acc', self.test_multiclass_acc.compute())
         self.log('test_time', self.test_time_logger.compute())
         self.log('test_time_as_list', self.test_time_logger_as_list.compute())
+        self.log('test_multilabel_acc', self.test_multilabel_acc.compute())
         self.evidence_accumulator.save('evidence_with_beta.pt')
         wandb.log({'test_set_size': self.test_set_size.compute()}, step=self.current_epoch)
         wandb.log({'test_acc': self.test_acc.compute()}, step=self.current_epoch)
         wandb.log({'test_time': self.test_time_logger.compute()}, step=self.current_epoch)
         wandb.log({'test_time_as_list': self.test_time_logger_as_list.compute()}, step=self.current_epoch)
+        wandb.log({'test_multiclass_acc': self.test_multiclass_acc.compute()}, step=self.current_epoch)
         for key, utility in self.test_utility_dict.items():
             self.log(f'test_utility_{key}', utility.compute())
             wandb.log({f'test_{key}': utility.compute()}, step=self.current_epoch)
@@ -251,6 +263,10 @@ class EMSECModel(pl.LightningModule):
         self.train_set_size = HyperSetSize(num_classes=self.num_classes)
         self.val_set_size = HyperSetSize(num_classes=self.num_classes)
         self.test_set_size = HyperSetSize(num_classes=self.num_classes)
+
+        self.train_multilabel_acc = MultilabelAccuracy(criteria='contain')
+        self.val_multilabel_acc = MultilabelAccuracy(criteria='contain')
+        self.test_multilabel_acc = MultilabelAccuracy(criteria='contain')
 
         self.train_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
         self.val_multiclass_acc = MulticlassAccuracy(num_classes=self.num_classes)
