@@ -2,8 +2,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import digamma
-from torch.distributions.constraints import multinomial
-from torch.onnx.symbolic_opset11 import argsort
 
 
 def kl_divergence(alpha, num_classes, device):
@@ -179,26 +177,30 @@ def ava_edl_criterion(
     probs = B_alpha / (B_alpha + B_beta)
     size = torch.sigmoid(targets.shape[1] * (probs - 0.5)).sum(dim=1)
 
-    cls_loss_per_inst = (targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha))).sum(dim=1)
-    cls_loss = torch.mean(cls_loss_per_inst)
-
-    loss = cls_loss + 20 * torch.relu(2.0 - size).mean()
-
-    soft_sizes = torch.sigmoid(((probs * (1 - targets)) - 0.5) * targets.shape[1]).sum(dim=1)
+    # cls_loss_per_inst = (targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha))).sum(dim=1)
+    weights = torch.ones_like(targets).float()
     if annealing_end > annealing_start:
         annealing_factor = np.clip((current_epoch - annealing_start) / (annealing_end - annealing_start), 0, 1)
     else:
         annealing_factor = 1.0
 
-    misclass_factor = torch.sigmoid(cls_loss_per_inst - T_cls)
+    pos_loss = targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha))
+    neg_loss = weights * (1 - targets) * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))
+    misclass_factor = torch.sigmoid(pos_loss - T_cls)
     adaptive_lambda = lambda_fbeta * (1 - annealing_factor * misclass_factor)
+    weights = weights * adaptive_lambda
+    loss = (pos_loss + weights * neg_loss).mean() + 20 * torch.relu(2.0 - size).mean()
 
-    size_penalty_per_inst = (1 - soft_sizes) ** 2
-    adaptive_size_loss = (adaptive_lambda * size_penalty_per_inst).mean()
+    # soft_sizes = torch.sigmoid(((probs * (1 - targets)) - 0.5) * targets.shape[1]).sum(dim=1)
 
-    final_loss = loss + adaptive_size_loss
 
-    return final_loss
+
+    # size_penalty_per_inst = (1 - soft_sizes) ** 2
+    # adaptive_size_loss = (adaptive_lambda * size_penalty_per_inst).mean()
+
+    # final_loss = loss + adaptive_size_loss
+
+    return loss
 
 
 def edl_hyperloss(func, y, alpha, hyperset_soft_size, epoch_num, num_classes, annealing_step, device, useKL=True,
