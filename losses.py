@@ -169,36 +169,40 @@ def soft_fbeta(probs, targets, beta=1.0, epsilon=1e-8):
     return fbeta_vals
 
 
+import torch
+import numpy as np
+
+
 def ava_edl_criterion(
         B_alpha, B_beta, targets, fbeta=1.0, current_epoch=0,
         annealing_start=100, annealing_end=200, lambda_fbeta=1.0,
-        T_cls=1.0  # threshold for classification loss to trigger relaxation
+        T_cls=1.0
 ):
     probs = B_alpha / (B_alpha + B_beta)
-    size = torch.sigmoid(targets.shape[1] * (probs - 0.5)).sum(dim=1)
 
-    # cls_loss_per_inst = (targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha))).sum(dim=1)
-    weights = torch.ones_like(targets).float()
+    scaling_factor = 20.0
+    size = torch.sigmoid(scaling_factor * (probs - 0.5)).sum(dim=1)
+
     if annealing_end > annealing_start:
         annealing_factor = np.clip((current_epoch - annealing_start) / (annealing_end - annealing_start), 0, 1)
     else:
         annealing_factor = 1.0
 
-    pos_loss = targets * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha))
-    neg_loss = weights * (1 - targets) * (torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta))
-    misclass_factor = torch.sigmoid(pos_loss - T_cls)
-    adaptive_lambda = lambda_fbeta * (1 - annealing_factor * misclass_factor)
-    weights = weights * adaptive_lambda
-    loss = (pos_loss + weights * neg_loss).mean() + 20 * torch.relu(2.0 - size).mean()
+    pos_term = torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)
+    neg_term = torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta)
 
-    # soft_sizes = torch.sigmoid(((probs * (1 - targets)) - 0.5) * targets.shape[1]).sum(dim=1)
+    pos_loss = targets * pos_term
+    neg_loss = (1 - targets) * neg_term
 
+    pos_loss_per_instance = pos_loss.mean(dim=1)  # shape: (batch,)
+    misclass_factor = torch.sigmoid(pos_loss_per_instance - T_cls)  # values between 0 and 1
+    adaptive_lambda = lambda_fbeta * (1 - annealing_factor * misclass_factor)  # shape: (batch,)
 
+    neg_loss_adjusted = neg_loss * adaptive_lambda.unsqueeze(1)
+    loss_cls = (pos_loss + neg_loss_adjusted).mean()
 
-    # size_penalty_per_inst = (1 - soft_sizes) ** 2
-    # adaptive_size_loss = (adaptive_lambda * size_penalty_per_inst).mean()
-
-    # final_loss = loss + adaptive_size_loss
+    candidate_penalty = 20.0 * torch.relu(2.0 - size).mean()
+    loss = loss_cls + candidate_penalty
 
     return loss
 
