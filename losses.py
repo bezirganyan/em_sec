@@ -174,37 +174,23 @@ import numpy as np
 
 
 def ava_edl_criterion(
-        B_alpha, B_beta, targets, fbeta=1.0, current_epoch=0,
-        annealing_start=100, annealing_end=200, lambda_fbeta=1.0,
-        T_cls=1.0
+    B_alpha, B_beta, targets,
+    *,                      # force kwargs after this
+    discount: torch.Tensor | None = None,  # shape (C,)
+    lambda_fbeta: float = 1.0,
 ):
-    probs = B_alpha / (B_alpha + B_beta)
-
-    scaling_factor = 20.0
-    size = torch.sigmoid(scaling_factor * (probs - 0.5)).sum(dim=1)
-
-    if annealing_end > annealing_start:
-        annealing_factor = np.clip((current_epoch - annealing_start) / (annealing_end - annealing_start), 0, 1)
-    else:
-        annealing_factor = 1.0
-
     pos_term = torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)
     neg_term = torch.digamma(B_alpha + B_beta) - torch.digamma(B_beta)
 
     pos_loss = targets * pos_term
-    neg_loss = (1 - targets) * neg_term
+    neg_loss = (1.0 - targets) * neg_term
 
-    pos_loss_per_instance = pos_loss.mean(dim=1)  # shape: (batch,)
-    misclass_factor = torch.sigmoid(pos_loss_per_instance - T_cls)  # values between 0 and 1
-    adaptive_lambda = lambda_fbeta * (1 - annealing_factor * misclass_factor)  # shape: (batch,)
-
-    neg_loss_adjusted = neg_loss * adaptive_lambda.unsqueeze(1)
-    loss_cls = (pos_loss + neg_loss_adjusted).mean()
-
-    candidate_penalty = 20.0 * torch.relu(2.0 - size).mean()
-    loss = loss_cls + candidate_penalty
-
-    return loss
+    if discount is None:
+        neg_loss = neg_loss * lambda_fbeta
+    else:
+        neg_loss = neg_loss * discount.unsqueeze(0)
+    loss_cls = (pos_loss + neg_loss).mean()
+    return loss_cls #+ reg
 
 
 def edl_hyperloss(func, y, alpha, hyperset_soft_size, epoch_num, num_classes, annealing_step, device, useKL=True,

@@ -32,6 +32,7 @@ class EMSECModel(pl.LightningModule):
         self.model.linear = nn.Identity()
         self.set_metrics()
         self.automatic_optimization = False
+        self.discount_logits = nn.Parameter(torch.zeros(num_classes) - 10)
 
     def forward(self, x):
         # Compute logits and apply ReLU.
@@ -69,8 +70,8 @@ class EMSECModel(pl.LightningModule):
         x, y = batch
         y = F.one_hot(y, self.num_classes)
         evidence_a, evidence_b, multinomial_evidence, evidence_hyper = self(x)
-        loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y, self.beta_param, self.current_epoch,
-                                            self.annealing_start, self.annealing_end, self.lambda_param)
+        loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y, discount=torch.sigmoid(self.discount_logits)) + \
+            + torch.exp(-self.discount_logits).mean()
         loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10,
                                        self.device, targets_one_hot=True)
         multilabel_probs = evidence_a / (evidence_a + evidence_b)
@@ -113,6 +114,7 @@ class EMSECModel(pl.LightningModule):
         loss_multilabel, loss_edl, evidence_hyper, multinomial_evidence, evidence_a, evidence_b, y, hyperset = self.shared_step(
             batch, batch_idx)
         loss = loss_multilabel + loss_edl
+        self.log('mean_discount_factor', torch.sigmoid(self.discount_logits).mean(), prog_bar=True)
         self.log('val_loss', loss, prog_bar=True)
         y_hat = evidence_hyper.argmax(dim=1)
         y_hat = F.one_hot(y_hat, self.num_classes + 1)
@@ -182,6 +184,21 @@ class EMSECModel(pl.LightningModule):
         wandb.log({'train_acc': self.train_acc.compute()}, step=self.current_epoch)
         wandb.log({'train_multiclass_acc': self.train_multiclass_acc.compute()}, step=self.current_epoch)
         wandb.log({'train_multilabel_acc': self.train_multilabel_acc.compute()}, step=self.current_epoch)
+        wandb.log({'mean_discount_factor': torch.sigmoid(self.discount_logits).mean()}, step=self.current_epoch)
+
+        discounts = torch.sigmoid(self.discount_logits).detach().cpu().numpy()
+        table = wandb.Table(
+            columns=["class", "discount_score"],
+            data=[[i, float(score)] for i, score in enumerate(discounts)]
+        )
+
+        wandb.log({
+            "discount_table": table,
+            "discount_bar": wandb.plot.bar(
+                table, "class", "discount_score",
+                title=f"Epoch {self.current_epoch}: class‑wise discounts"
+            )
+        }, step=self.current_epoch)
 
 
     def on_validation_epoch_end(self) -> None:
@@ -217,10 +234,12 @@ class EMSECModel(pl.LightningModule):
         self.cor_unc_plot.plot()
         self.hyper_uncertainty_plot.plot()
         self.test_set_size.plot()
+        print("====== Discount Factors ======")
+        print(torch.sigmoid(self.discount_logits))
 
     def configure_optimizers(self):
         # First optimizer for multilabel components (alpha and beta)
-        multilabel_params = list(self.alpha.parameters()) + list(self.beta.parameters())
+        multilabel_params = list(self.alpha.parameters()) + list(self.beta.parameters()) + [self.discount_logits]
         opt_multilabel = Adam(multilabel_params, lr=self.learning_rate)
 
         # Second optimizer for multinomial evidence collector and base model
