@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import wandb
+from matplotlib import pyplot as plt
+import seaborn as sns
 from torch.optim import Adam
 from torcheval.metrics import MulticlassAccuracy, MultilabelAccuracy
 
@@ -32,7 +34,7 @@ class EMSECModel(pl.LightningModule):
         self.model.linear = nn.Identity()
         self.set_metrics()
         self.automatic_optimization = False
-        self.discount_logits = nn.Parameter(torch.zeros(num_classes) - 10)
+        self.discount_logits = nn.Parameter(torch.zeros(num_classes, num_classes) - 10)
 
     def forward(self, x):
         # Compute logits and apply ReLU.
@@ -180,24 +182,14 @@ class EMSECModel(pl.LightningModule):
         self.log('train_set_size', self.train_set_size.compute())
         self.log('train_acc', self.train_acc.compute(), prog_bar=True)
         self.log('train_multilabel_acc', self.train_multilabel_acc.compute(), prog_bar=True)
-        wandb.log({'train_set_size': self.train_set_size.compute()}, step=self.current_epoch)
-        wandb.log({'train_acc': self.train_acc.compute()}, step=self.current_epoch)
-        wandb.log({'train_multiclass_acc': self.train_multiclass_acc.compute()}, step=self.current_epoch)
-        wandb.log({'train_multilabel_acc': self.train_multilabel_acc.compute()}, step=self.current_epoch)
-        wandb.log({'mean_discount_factor': torch.sigmoid(self.discount_logits).mean()}, step=self.current_epoch)
 
-        discounts = torch.sigmoid(self.discount_logits).detach().cpu().numpy()
-        table = wandb.Table(
-            columns=["class", "discount_score"],
-            data=[[i, float(score)] for i, score in enumerate(discounts)]
-        )
-
+        # Log scalar metrics
         wandb.log({
-            "discount_table": table,
-            "discount_bar": wandb.plot.bar(
-                table, "class", "discount_score",
-                title=f"Epoch {self.current_epoch}: class‑wise discounts"
-            )
+            'train_set_size': self.train_set_size.compute(),
+            'train_acc': self.train_acc.compute(),
+            'train_multiclass_acc': self.train_multiclass_acc.compute(),
+            'train_multilabel_acc': self.train_multilabel_acc.compute(),
+            'mean_discount_factor': torch.sigmoid(self.discount_logits).mean().item()
         }, step=self.current_epoch)
 
 
@@ -236,6 +228,32 @@ class EMSECModel(pl.LightningModule):
         self.test_set_size.plot()
         print("====== Discount Factors ======")
         print(torch.sigmoid(self.discount_logits))
+
+        discounts = torch.sigmoid(self.discount_logits).detach().cpu().numpy()
+        class_labels = [f"class_{i}" for i in range(self.num_classes)]
+
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(discounts, xticklabels=class_labels, yticklabels=class_labels, cmap="viridis", annot=True,
+                    fmt=".2f")
+        plt.title(f"Epoch {self.current_epoch}: Discount Matrix")
+        plt.xlabel("Predicted Class")
+        plt.ylabel("True Class")
+        heatmap_img = wandb.Image(plt.gcf())
+        plt.close()
+
+        avg_discounts = discounts.mean(axis=1)
+        bar_table = wandb.Table(
+            columns=["class", "avg_discount_score"],
+            data=[[i, float(score)] for i, score in enumerate(avg_discounts)]
+        )
+
+        wandb.log({
+            "discount_matrix_heatmap": heatmap_img,
+            "discount_avg_bar": wandb.plot.bar(
+                bar_table, "class", "avg_discount_score",
+                title=f"Epoch {self.current_epoch}: Avg Discount per Class"
+            )
+        }, step=self.current_epoch)
 
     def configure_optimizers(self):
         # First optimizer for multilabel components (alpha and beta)
