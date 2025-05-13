@@ -10,10 +10,12 @@ from metrics import BetaEvidenceAccumulator, PredictionSetSize
 
 
 class BetaModel(pl.LightningModule):
-    def __init__(self, model, num_classes=10, learning_rate=1e-3):
+    def __init__(self, model, num_classes=10, learning_rate=1e-3, beta=1, lambda_param=1):
         super(BetaModel, self).__init__()
         self.save_hyperparameters()
         self.model = model
+        self.beta_param = beta
+        self.lambda_param = lambda_param
         self.num_classes = num_classes
         self.alpha = nn.Linear(self.model.linear.in_features, num_classes)
         self.beta = nn.Linear(self.model.linear.in_features, num_classes)
@@ -33,7 +35,7 @@ class BetaModel(pl.LightningModule):
         evidence_a = F.elu(
             logits_a) + 2  # TODO - in the original implementation, they add 2, but it's not clear why, check this later
         evidence_b = F.elu(logits_b) + 2
-        loss = ava_edl_criterion(evidence_a, evidence_b, y)
+        loss = ava_edl_criterion(evidence_a, evidence_b, y, fbeta=self.beta_param, lambda_fbeta=self.lambda_param)
         return loss, evidence_a, evidence_b, y
 
     def training_step(self, batch, batch_idx):

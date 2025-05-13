@@ -22,7 +22,7 @@ def main():
     sbatch_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
 #SBATCH --partition=gpu
-#SBATCH --gpus=1
+#SBATCH --gpus=a40-48:1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=7-00:00:00
 #SBATCH --output=slurm_logs/stdout_{job_name}.out

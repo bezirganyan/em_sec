@@ -36,7 +36,7 @@ class DSModel(pl.LightningModule):
 
         # Backbone: ResNet for feature extraction.
         self.model = model
-        hs = self.model.linear.in_features
+        hs = 512
         self.model.linear = nn.Identity()
 
         # DS network: converts features into evidential outputs.

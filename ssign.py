@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import subprocess
 import argparse
-
+import random
 def main():
     parser = argparse.ArgumentParser(
         description="Generate and submit a single SBATCH job with custom parameters."
@@ -11,7 +11,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=300, help="Number of epochs (default: 300)")
     parser.add_argument("--job-name", help="Optional job name. If not provided, defaults to 'model_dataset_epochs'")
     parser.add_argument("--runs", type=int, default=10, help="Number of runs")
-    parser.add_argument("--project", type=str, default="VagueSignificance", help="Wandb project name")
+    parser.add_argument("--project", type=str, default="ModernVagueSignificance", help="Wandb project name")
 
 
     # Capture extra parameters that are not defined
@@ -25,14 +25,15 @@ def main():
     sbatch_script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
 #SBATCH --partition=gpu
-#SBATCH --gpus=1
+#SBATCH --gpus=a40-48:1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=7-00:00:00
-#SBATCH --output=slurm_logs/stdout_{job_name}.out
-#SBATCH --error=slurm_logs/stderr_{job_name}.out
+#SBATCH --output=slurm_logs/stdout_{job_name}_{random.randint(0, 1000)}.out
+#SBATCH --error=slurm_logs/stderr_{job_name}_{random.randint(0, 1000)}.out
 
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate em_sec
+# source ~/miniconda3/etc/profile.d/conda.sh
+# conda activate em_sec
+source env/bin/activate
 
 srun -N1 -n1 python run_for_significance.py --model {args.model} --epochs {args.epochs} --enable-wandb --dataset {args.dataset} --runs {args.runs} --project {args.project} {extra_params}
 """
