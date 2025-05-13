@@ -20,7 +20,7 @@ class SVPModel(pl.LightningModule):
         self.model = model
         self.num_classes = num_classes
         self.beta_param = beta
-        hs = self.model.linear.in_features
+        hs = 512
         self.model.linear = nn.Identity()
         self.set_metrics()
         self.set_params = {

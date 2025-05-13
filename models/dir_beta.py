@@ -71,7 +71,7 @@ class EMSECModel(pl.LightningModule):
         y = F.one_hot(y, self.num_classes)
         evidence_a, evidence_b, multinomial_evidence, evidence_hyper = self(x)
         loss_multilabel = ava_edl_criterion(evidence_a, evidence_b, y, discount=torch.sigmoid(self.discount_logits)) + \
-            + torch.exp(-self.discount_logits).mean()
+            + self.lambda_param * torch.exp(-self.discount_logits).mean()
         loss_edl = get_evidential_loss(multinomial_evidence, y, self.current_epoch, self.num_classes, 10,
                                        self.device, targets_one_hot=True)
         multilabel_probs = evidence_a / (evidence_a + evidence_b)
