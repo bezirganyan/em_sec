@@ -169,14 +169,10 @@ def soft_fbeta(probs, targets, beta=1.0, epsilon=1e-8):
     return fbeta_vals
 
 
-import torch
-import numpy as np
-
-
 def ava_edl_criterion(
     B_alpha, B_beta, targets,
     *,                      # force kwargs after this
-    discount: torch.Tensor | None = None,  # shape (C,)
+    discount: torch.Tensor | None = None,  # shape (C, C)
     lambda_fbeta: float = 1.0,
 ):
     pos_term = torch.digamma(B_alpha + B_beta) - torch.digamma(B_alpha)
@@ -185,10 +181,13 @@ def ava_edl_criterion(
     pos_loss = targets * pos_term
     neg_loss = (1.0 - targets) * neg_term
 
+    # take from each row the element corresponding to the class
+    discounts_per_class = discount[targets.argmax(dim=1)]
+
     if discount is None:
         neg_loss = neg_loss * lambda_fbeta
     else:
-        neg_loss = neg_loss * discount.unsqueeze(0)
+        neg_loss = neg_loss * discounts_per_class
     loss_cls = (pos_loss + neg_loss).mean()
     return loss_cls #+ reg
 

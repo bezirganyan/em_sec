@@ -1,7 +1,7 @@
 from torch import nn
 
 class DenseClassifier(nn.Module):
-    def __init__(self, in_features, out_features, hidden_features=(256, 256), dropout=0.5):
+    def __init__(self, in_features, out_features, hidden_features=(256, 256), dropout=0.9):
         super(DenseClassifier, self).__init__()
         self.layers = nn.ModuleList()
         self.layers.append(nn.Linear(in_features, hidden_features[0]))
