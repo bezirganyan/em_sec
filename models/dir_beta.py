@@ -232,7 +232,7 @@ class EMSECModel(pl.LightningModule):
         discounts = torch.sigmoid(self.discount_logits).detach().cpu().numpy()
         class_labels = [f"class_{i}" for i in range(self.num_classes)]
 
-        plt.figure(figsize=(8, 6))
+        plt.figure(figsize=(20, 18))
         sns.heatmap(discounts, xticklabels=class_labels, yticklabels=class_labels, cmap="viridis", annot=True,
                     fmt=".2f")
         plt.title(f"Epoch {self.current_epoch}: Discount Matrix")
