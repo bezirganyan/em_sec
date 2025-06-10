@@ -182,11 +182,11 @@ def ava_edl_criterion(
     neg_loss = (1.0 - targets) * neg_term
 
     # take from each row the element corresponding to the class
-    discounts_per_class = discount[targets.argmax(dim=1)]
 
     if discount is None:
         neg_loss = neg_loss * lambda_fbeta
     else:
+        discounts_per_class = discount[targets.argmax(dim=1)]
         neg_loss = neg_loss * discounts_per_class
     loss_cls = (pos_loss + neg_loss).mean()
     return loss_cls #+ reg
