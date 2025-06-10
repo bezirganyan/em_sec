@@ -52,8 +52,10 @@ def wandb_name_from_args(args):
         return f"{args.model}_{args.dataset}_{args.epochs}_epochs"
     elif args.model == 'enn':
         return f"{args.model}_{args.dataset}_{args.epochs}_epochs_{args.unc_calib}_uncalib"
-    elif (args.model == 'emsec') or (args.model == 'svp'):
+    elif (args.model == 'svp'):
         return f"{args.model}_{args.dataset}_{args.beta}_beta_{args.epochs}_epochs"
+    elif (args.model == 'emsec'):
+        return f"{args.model}_{args.dataset}_{args.lambda_param}_lambda_{args.epochs}_epochs"
     elif args.model == 'ds':
         return f"{args.model}_{args.dataset}_{args.gamma}_gamma_{args.epochs}_epochs"
     else:
