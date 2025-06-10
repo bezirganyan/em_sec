@@ -52,7 +52,7 @@ def wandb_name_from_args(args):
         return f"{args.model}_{args.dataset}_{args.epochs}_epochs"
     elif args.model == 'enn':
         return f"{args.model}_{args.dataset}_{args.epochs}_epochs_{args.unc_calib}_uncalib"
-    elif (args.model == 'hyper') or (args.model == 'svp'):
+    elif (args.model == 'emsec') or (args.model == 'svp'):
         return f"{args.model}_{args.dataset}_{args.beta}_beta_{args.epochs}_epochs"
     elif args.model == 'ds':
         return f"{args.model}_{args.dataset}_{args.gamma}_gamma_{args.epochs}_epochs"
@@ -108,7 +108,7 @@ def main():
         model = BetaModel.load_from_checkpoint(args.ckpt_path) if args.ckpt_path else \
             BetaModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta,
                       lambda_param=args.lambda_param)
-    elif args.model == 'hyper':
+    elif args.model == 'emsec':
         model = EMSECModel.load_from_checkpoint(args.ckpt_path, strict=False) if args.ckpt_path else \
             EMSECModel(model_backbone, num_classes=num_classes, learning_rate=args.learning_rate, beta=args.beta,
                        annealing_start=args.ann_start, annealing_end=args.ann_end, lambda_param=args.lambda_param)
