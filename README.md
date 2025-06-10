@@ -21,7 +21,7 @@ pip install -r requirements.txt
 ### Running Training
 To train the model on a dataset, use:
 ```bash
-python main.py --dataset cifar10 --model hyper --epochs 300 --enable-wandb
+python main.py --dataset cifar10 --model emsec --epochs 300 --enable-wandb
 ```
 Other available datasets:
 - `cifar10`
@@ -41,7 +41,7 @@ This project supports multiple models:
 - `cnn`: Standard convolutional model
 - `enn`: Evidential neural network [1]
 - `beta`: Beta distribution-based multlabel uncertainty model [2]
-- `hyper`: EM-SEC model for hyperopinions
+- `emsec`: EM-SEC model for hyperopinions
 - `ds`: Demptser Shafer Evidential Neural Network [3]
 - `svp`: Efficient Set-valued prediction model [4]
 
