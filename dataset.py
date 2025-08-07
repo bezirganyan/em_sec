@@ -190,7 +190,7 @@ class LUMADataset(Dataset):
         if self.target_transform is not None:
             target = self.target_transform(target)
 
-        return image, target
+        return image.float(), target
 
     def __len__(self):
         return len(self.image_data)
