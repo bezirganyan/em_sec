@@ -1,4 +1,5 @@
 # Uncertainty-Aware Set-Valued Classification
+Official implementation of the research paper ["EM-SEC: Efficient Multi-head Set-valued Evidential Classification"](https://ecmlpkdd-storage.s3.eu-central-1.amazonaws.com/preprints/2025/research/preprint_ecml_pkdd_2025_research_1097.pdf), accepted to the ECML-PKDD 2025 Conference. 
 
 ## Overview
 This repository provides an implementation of a novel approach to set-valued classification that integrates **evidential deep learning** and **subjective logic** to effectively quantify classification uncertainty. The method is designed to be computationally efficient while maintaining high predictive performance, particularly in scenarios where AI-assisted decision-making is crucial.
@@ -59,8 +60,19 @@ For further details, refer to the paper abstract below:
 
 ## Citation
 If you use this work, please cite:
+
 ```
-to ba added
+@inproceedings{bezirganyan2025emsec,
+  author = {Bezirganyan, Grigor and Sellami, Sana and Berti-\'Equille, Laure and Fournier, S\'ebastien},
+  title        = {EM-SEC: Efficient Multi-head Set-valued Evidential Classification},
+  booktitle    = {Machine Learning and Knowledge Discovery in Databases. Research Track
+                  - European Conference, {ECML} {PKDD} 2025, Porto, Portugal, September
+                  15-19, 2025, Proceedings},
+  series       = {Lecture Notes in Computer Science},
+  publisher    = {Springer},
+  year         = {2025},
+  doi          = {https://doi.org/10.1007/978-3-032-05981-9_16}
+}
 ```
 
 ## References
